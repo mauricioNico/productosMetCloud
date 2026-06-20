@@ -1,4 +1,4 @@
-name: Prueba Maven
+name: Prueba Maven + Python
 
 on:
   workflow_dispatch:
@@ -16,5 +16,19 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      - name: Compilar
-        run: mvn clean package
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Verificar Python
+        run: |
+          python --version
+
+      - name: Instalar librerías básicas
+        run: |
+          python -m pip install --upgrade pip
+          pip install numpy pandas matplotlib
+
+      - name: Compilar proyecto
+        run: |
+          mvn clean package
