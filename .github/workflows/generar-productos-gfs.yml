@@ -27,7 +27,15 @@ jobs:
       - name: Instalar librerías básicas
         run: |
           python -m pip install --upgrade pip
-          pip install numpy pandas matplotlib
+          pip install \
+          numpy \
+          pandas \
+          matplotlib \
+          xarray \
+          cfgrib \
+          netCDF4 \
+          metpy \
+          cartopy
 
       - name: Compilar proyecto
         run: |
