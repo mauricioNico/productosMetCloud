@@ -1,4 +1,4 @@
-name: Prueba Maven + Python
+name: Generar productos GFS
 
 on:
   workflow_dispatch:
@@ -6,17 +6,20 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 360
 
     steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
 
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-java@v4
+      - name: Instalar Java 17
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 17
 
-      - uses: actions/setup-python@v5
+      - name: Instalar Python 3.11
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
@@ -24,24 +27,47 @@ jobs:
         run: |
           python --version
 
-      - name: Instalar librerías básicas
+      - name: Instalar librerías meteorológicas
         run: |
           python -m pip install --upgrade pip
           pip install \
-          numpy \
-          pandas \
-          matplotlib \
-          xarray \
-          cfgrib \
-          netCDF4 \
-          metpy \
-          cartopy
+            numpy \
+            pandas \
+            matplotlib \
+            xarray \
+            cfgrib \
+            netCDF4 \
+            metpy \
+            cartopy
+
       - name: Verificar scripts Python
         run: |
           echo "Contenido carpeta python:"
           ls -la python
 
-      - name: Compilar proyecto
+      - name: Compilar proyecto Java
         run: |
           mvn clean package
-          
+
+      - name: Ejecutar generador meteorologico
+        run: |
+          java -jar target/generador-cartas-gfs-1.0.0-jar-with-dependencies.jar
+
+      - name: Mostrar carpetas generadas
+        if: always()
+        run: |
+          echo "===== GRIBS ====="
+          find gribs -type f 2>/dev/null | head -50
+
+          echo "===== SALIDAS ====="
+          find salidas -type f 2>/dev/null | head -100
+
+      - name: Subir resultados
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: productos-generados
+          path: |
+            salidas/
+            logs/
+          retention-days: 3
