@@ -36,7 +36,12 @@ jobs:
           netCDF4 \
           metpy \
           cartopy
+      - name: Verificar scripts Python
+        run: |
+          echo "Contenido carpeta python:"
+          ls -la python
 
       - name: Compilar proyecto
         run: |
           mvn clean package
+          
