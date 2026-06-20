@@ -1,0 +1,12 @@
+target/
+gribs/
+salidas/
+logs/
+loops/
+
+*.grib2
+*.idx
+*.log
+
+.vscode/
+.idea/
