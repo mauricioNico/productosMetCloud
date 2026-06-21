@@ -53,6 +53,10 @@ jobs:
         run: |
           java -jar target/generador-cartas-gfs-1.0.0-jar-with-dependencies.jar
 
+      - name: Ejecutar generador de soundings
+        run: |
+          mvn exec:java -Dexec.mainClass=GenerarSoundingsAutomaticoGFS
+
       - name: Mostrar carpetas generadas
         if: always()
         run: |
