@@ -78,12 +78,24 @@ jobs:
           HORA=$(date -u +'%H')
           echo "artifact_name=${FECHA}${HORA}UTC" >> $GITHUB_OUTPUT
 
-      - name: Subir resultados
+      - name: Dividir productos en ZIP
+        if: always()
+        run: |
+          mkdir -p paquetes
+
+          zip -r "paquetes/${{ steps.nombre.outputs.artifact_name }}_cartas.zip" salidas/*/cartas* || true
+
+          zip -r "paquetes/${{ steps.nombre.outputs.artifact_name }}_meteogramas.zip" salidas/*/meteogramas* || true
+
+          zip -r "paquetes/${{ steps.nombre.outputs.artifact_name }}_soundings.zip" salidas/*/soundings* || true
+
+          echo "===== PAQUETES GENERADOS ====="
+          ls -lh paquetes
+
+      - name: Subir resultados divididos
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.nombre.outputs.artifact_name }}
-          path: |
-            salidas/
-            logs/
+          name: ${{ steps.nombre.outputs.artifact_name }}_paquetes
+          path: paquetes/
           retention-days: 7
