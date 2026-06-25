@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+    #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
 sounding_gfs.py
@@ -398,6 +398,100 @@ def fmt_indice(valor, decimales=0, unidad=""):
     return f"{valor:.{decimales}f}{unidad}"
 
 
+def presion_a_pies_estandar(p_hpa):
+    """
+    Convierte presión en hPa a altura aproximada en pies usando atmósfera estándar.
+
+    Importante:
+    - No es altura geopotencial real del modelo.
+    - Sirve como referencia operativa rápida para ubicar niveles en el sondeo.
+    """
+    try:
+        altura = mpcalc.pressure_to_height_std(float(p_hpa) * units.hPa)
+        return float(altura.to("feet").magnitude)
+    except Exception:
+        return np.nan
+
+
+def fmt_lcl_pies(lcl_hpa):
+    """
+    Formatea el LCL en pies a partir de su presión.
+    """
+    if not np.isfinite(lcl_hpa):
+        return "s/d"
+
+    altura_ft = presion_a_pies_estandar(lcl_hpa)
+
+    if not np.isfinite(altura_ft):
+        return "s/d"
+
+    return f"{altura_ft:.0f} ft"
+
+
+def anotar_temperatura_y_altura_desde_500(skew, p, T):
+    """
+    Anota sobre la curva de temperatura el valor térmico desde 500 hPa hacia arriba,
+    cada 50 hPa, junto con la altura aproximada expresada en centenas de pies.
+
+    Ejemplo de etiqueta:
+        -22°C / 182
+
+    Donde 182 representa aproximadamente 18.200 pies.
+    """
+    try:
+        p_hpa = np.asarray(p.magnitude, dtype=float)
+        t_c = np.asarray(T.to("degC").magnitude, dtype=float)
+
+        mascara = np.isfinite(p_hpa) & np.isfinite(t_c)
+        p_hpa = p_hpa[mascara]
+        t_c = t_c[mascara]
+
+        if len(p_hpa) == 0:
+            return
+
+        # Para interpolar, la presión debe estar en orden ascendente.
+        orden = np.argsort(p_hpa)
+        p_asc = p_hpa[orden]
+        t_asc = t_c[orden]
+
+        nivel_inferior = 500.0
+        nivel_superior = max(float(NIVEL_TOPE_HPA), float(np.nanmin(p_asc)))
+
+        niveles = np.arange(nivel_inferior, nivel_superior - 1, -50.0)
+
+        for nivel in niveles:
+            if nivel < np.nanmin(p_asc) or nivel > np.nanmax(p_asc):
+                continue
+
+            temp_nivel = np.interp(nivel, p_asc, t_asc)
+            altura_ft = presion_a_pies_estandar(nivel)
+
+            if not np.isfinite(temp_nivel) or not np.isfinite(altura_ft):
+                continue
+
+            altura_centenas_ft = altura_ft / 100.0
+
+            skew.ax.text(
+                temp_nivel + 1.0,
+                nivel,
+                f"{temp_nivel:.0f}°C / {altura_centenas_ft:.0f}",
+                fontsize=7,
+                color="red",
+                ha="left",
+                va="center",
+                bbox=dict(
+                    boxstyle="round,pad=0.15",
+                    facecolor="white",
+                    alpha=0.65,
+                    edgecolor="none"
+                ),
+                zorder=5
+            )
+
+    except Exception as e:
+        print(f"⚠ No se pudieron anotar temperaturas y alturas desde 500 hPa: {e}")
+
+
 def filtrar_perfil_hasta_150_hpa(p, T, Td, U, V):
     """
     Limita el perfil al tramo 1000-150 hPa.
@@ -498,6 +592,9 @@ def generar_sounding(archivo, carpeta_salidas, lat, lon, nombre_punto):
     skew.plot(p, T, "red", linewidth=2.0, label="T")
     skew.plot(p, Td, "green", linewidth=2.0, label="Td")
 
+    # Temperatura y altura aproximada cada 50 hPa desde 500 hPa hacia arriba.
+    anotar_temperatura_y_altura_desde_500(skew, p, T)
+
     if indices["parcel_profile"] is not None:
         try:
             skew.plot(p, indices["parcel_profile"], "black", linewidth=1.4, linestyle="--", label="Parcela")
@@ -533,7 +630,7 @@ def generar_sounding(archivo, carpeta_salidas, lat, lon, nombre_punto):
     skew.ax.set_title(subtitulo, loc="right", fontsize=9)
 
     texto = (
-        f"LCL: {fmt_indice(indices['LCL'], 0, ' hPa')}\n"
+        f"LCL: {fmt_lcl_pies(indices['LCL'])}\n"
         f"CAPE: {fmt_indice(indices['CAPE'], 0, ' J/kg')}\n"
         f"CIN: {fmt_indice(indices['CIN'], 0, ' J/kg')}\n"
         f"LI: {fmt_indice(indices['LI'], 1, '')}\n"
