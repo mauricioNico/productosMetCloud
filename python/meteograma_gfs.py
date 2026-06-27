@@ -331,26 +331,67 @@ def calcular_precipitacion_intervalo(tp_acum):
 
 
 def fijar_escala_precipitacion(ax, valores):
+    valores = np.asarray(valores, dtype=float)
+    valores = valores[np.isfinite(valores)]
+
+    if len(valores) == 0:
+        ax.set_ylim(0, 1)
+        ax.set_yticks([0, 0.5, 1])
+        return
+
     pp_max = np.nanmax(valores)
 
-    if np.isfinite(pp_max):
-        if pp_max <= 1:
-            ax.set_ylim(0, 1)
-        elif pp_max <= 5:
-            ax.set_ylim(0, 5)
-        elif pp_max <= 10:
-            ax.set_ylim(0, 10)
-        elif pp_max <= 25:
-            ax.set_ylim(0, 25)
-        else:
-            ax.set_ylim(0, 50)
+    if pp_max <= 1:
+        lim = 1
+        ticks = [0, 0.5, 1]
+    elif pp_max <= 5:
+        lim = 5
+        ticks = np.arange(0, lim + 1, 1)
+    elif pp_max <= 10:
+        lim = 10
+        ticks = np.arange(0, lim + 2, 2)
+    elif pp_max <= 25:
+        lim = 25
+        ticks = np.arange(0, lim + 5, 5)
+    elif pp_max <= 50:
+        lim = 50
+        ticks = np.arange(0, lim + 10, 10)
     else:
-        ax.set_ylim(0, 1)
+        lim = np.ceil(pp_max / 10.0) * 10.0
+        ticks = np.arange(0, lim + 10, 10)
+
+    ax.set_ylim(0, lim)
+    ax.set_yticks(ticks)
 
 
 def fijar_escala_cape(ax, valores):
-    ax.set_ylim(0, 3000)
-    ax.set_yticks([0, 500, 1000, 1500, 2000, 2500, 3000])
+    valores = np.asarray(valores, dtype=float)
+    valores = valores[np.isfinite(valores)]
+
+    if len(valores) == 0:
+        lim = 1000
+    else:
+        vmax = np.nanmax(valores)
+
+        if vmax <= 1000:
+            lim = 1000
+        elif vmax <= 2000:
+            lim = 2000
+        elif vmax <= 3000:
+            lim = 3000
+        elif vmax <= 5000:
+            lim = 5000
+        else:
+            lim = np.ceil(vmax / 1000.0) * 1000.0
+
+    ax.set_ylim(0, lim)
+
+    if lim <= 3000:
+        paso = 500
+    else:
+        paso = 1000
+
+    ax.set_yticks(np.arange(0, lim + paso, paso))
 
 
 def fijar_escala_lifted(ax, valores):
@@ -359,17 +400,35 @@ def fijar_escala_lifted(ax, valores):
 
 
 def fijar_escala_omega(ax, valores):
+    valores = np.asarray(valores, dtype=float)
+    valores = valores[np.isfinite(valores)]
+
+    if len(valores) == 0:
+        ax.set_ylim(-0.25, 0.15)
+        ax.set_yticks([-0.2, -0.1, 0, 0.1])
+        return
+
     omin = np.nanmin(valores)
     omax = np.nanmax(valores)
 
-    if not np.isfinite(omin) or not np.isfinite(omax):
-        ax.set_ylim(-0.25, 0.15)
-        return
-
     lim = max(abs(omin), abs(omax), 0.10)
-    lim = min(max(lim * 1.25, 0.15), 1.0)
+    lim = max(lim * 1.25, 0.15)
 
     ax.set_ylim(-lim, lim)
+
+    if lim <= 0.25:
+        paso = 0.10
+    elif lim <= 0.5:
+        paso = 0.20
+    elif lim <= 1.0:
+        paso = 0.50
+    elif lim <= 2.0:
+        paso = 1.0
+    else:
+        paso = 2.0
+
+    ticks = np.arange(-lim, lim + paso, paso)
+    ax.set_yticks(ticks)
 
 
 def color_cape(valor):
