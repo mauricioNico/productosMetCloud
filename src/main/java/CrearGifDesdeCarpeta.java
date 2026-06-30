@@ -56,7 +56,12 @@ public class CrearGifDesdeCarpeta {
             return;
         }
 
+        System.out.println("Imágenes encontradas: " + imagenes.size());
+
         ImageWriter writer = ImageIO.getImageWritersBySuffix("gif").next();
+
+        int imagenesValidas = 0;
+        int imagenesOmitidas = 0;
 
         try (ImageOutputStream output = ImageIO.createImageOutputStream(salida)) {
 
@@ -64,7 +69,24 @@ public class CrearGifDesdeCarpeta {
             writer.prepareWriteSequence(null);
 
             for (File archivo : imagenes) {
-                BufferedImage imagen = ImageIO.read(archivo);
+
+                BufferedImage imagen;
+
+                try {
+                    imagen = ImageIO.read(archivo);
+
+                    if (imagen == null) {
+                        System.out.println("⚠ Imagen inválida, se omite: " + archivo.getName());
+                        imagenesOmitidas++;
+                        continue;
+                    }
+
+                } catch (Exception e) {
+                    System.out.println("⚠ Error leyendo imagen, se omite: " + archivo.getName());
+                    System.out.println("  " + e.getMessage());
+                    imagenesOmitidas++;
+                    continue;
+                }
 
                 ImageWriteParam params = writer.getDefaultWriteParam();
                 IIOMetadata metadata = writer.getDefaultImageMetadata(
@@ -75,12 +97,26 @@ public class CrearGifDesdeCarpeta {
 
                 IIOImage frame = new IIOImage(imagen, null, metadata);
                 writer.writeToSequence(frame, params);
+
+                imagenesValidas++;
+                System.out.println("✔ Frame agregado: " + archivo.getName());
             }
 
             writer.endWriteSequence();
         }
 
-        System.out.println("GIF generado correctamente: " + salida.getAbsolutePath());
+        if (imagenesValidas == 0) {
+            System.out.println("❌ No hubo imágenes válidas. Se elimina GIF vacío.");
+            salida.delete();
+            return;
+        }
+
+        System.out.println("===================================");
+        System.out.println("GIF generado correctamente:");
+        System.out.println(salida.getAbsolutePath());
+        System.out.println("Imágenes válidas:  " + imagenesValidas);
+        System.out.println("Imágenes omitidas: " + imagenesOmitidas);
+        System.out.println("===================================");
     }
 
     private static void configurarMetadata(IIOMetadata metadata, int delayMs) throws Exception {
