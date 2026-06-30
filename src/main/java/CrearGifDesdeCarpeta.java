@@ -10,21 +10,39 @@ public class CrearGifDesdeCarpeta {
 
     public static void main(String[] args) throws Exception {
 
+        if (args.length < 1) {
+            System.out.println("Uso: java -jar generador-gif.jar carpetaImagenes [carpetaSalida] [delayMs]");
+            return;
+        }
+
         File carpeta = new File(args[0]);
-       String fechaHora = java.time.LocalDateTime.now()
-        .format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
 
-File carpetaSalida = new File("C:/modelos/loops");
-carpetaSalida.mkdirs();
+        File carpetaSalida = args.length >= 2
+                ? new File(args[1])
+                : new File("loops");
 
-File salida = new File(
-        carpetaSalida,
-        "animacion_" + fechaHora + ".gif"
-);
+        int delayMs = args.length >= 3
+                ? Integer.parseInt(args[2])
+                : 1000;
 
-        int delayMs = 1000; // tiempo entre imágenes
+        carpetaSalida.mkdirs();
 
-        List<File> imagenes = Arrays.stream(carpeta.listFiles())
+        String fechaHora = java.time.LocalDateTime.now()
+                .format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
+
+        File salida = new File(
+                carpetaSalida,
+                "animacion_satelite_" + fechaHora + ".gif"
+        );
+
+        File[] archivos = carpeta.listFiles();
+
+        if (archivos == null) {
+            System.out.println("No se pudo leer la carpeta: " + carpeta.getAbsolutePath());
+            return;
+        }
+
+        List<File> imagenes = Arrays.stream(archivos)
                 .filter(File::isFile)
                 .filter(f -> {
                     String n = f.getName().toLowerCase();
@@ -89,7 +107,7 @@ File salida = new File(
         appExtension.setAttribute("applicationID", "NETSCAPE");
         appExtension.setAttribute("authenticationCode", "2.0");
 
-        byte[] loop = new byte[] { 0x1, 0x0, 0x0 };
+        byte[] loop = new byte[]{0x1, 0x0, 0x0};
         appExtension.setUserObject(loop);
 
         appExtensions.appendChild(appExtension);
