@@ -1,5 +1,9 @@
 name: Generar loop satelital
 
+concurrency:
+  group: satelite
+  cancel-in-progress: false
+
 on:
   workflow_dispatch:
 
@@ -35,7 +39,7 @@ jobs:
         run: |
           mvn clean package
 
-      - name: Descargar 10 imagenes cada 15 minutos
+      - name: Descargar 10 imagenes cada 17 minutos
         env:
           SAT_USER: ${{ secrets.SAT_USER }}
           SAT_PASSWORD: ${{ secrets.SAT_PASSWORD }}
@@ -48,8 +52,8 @@ jobs:
             python python/descargar_satelite.py
 
             if [ "$i" -lt 10 ]; then
-              echo "Esperando 15 minutos..."
-              sleep 900
+              echo "Esperando 17 minutos..."
+              sleep 1020
             fi
           done
 
@@ -60,13 +64,6 @@ jobs:
         run: |
           mkdir -p loops
           java -jar target/generador-cartas-gfs-1.0.0-gif.jar satelite loops 1000
-
-      - name: Mostrar loops generados
-        if: always()
-        run: |
-          echo "===== LOOPS ====="
-          find loops -type f -name "*.gif" -print
-          ls -lh loops || true
 
       - name: Subir loop satelital
         if: always()
