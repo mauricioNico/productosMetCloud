@@ -555,33 +555,33 @@ def main():
         try:
             bounds = [0.2, 0.5, 1, 2, 5, 10, 20, 30, 50, 70, 100, 150]
             colors = [
-                "#eef7ff",
-                "#d7ecff",
-                "#b9ddff",
-                "#8ec7ff",
-                "#5faeff",
-                "#2f8cff",
-                "#22b573",
-                "#7bdc65",
-                "#fff66b",
-                "#ffb347",
-                "#ff5a5a",
-            ]
+    "#e8ffff",  # 0.2
+    "#9ffcff",  # 0.5
+    "#45e8ff",  # 1
+    "#00bfff",  # 2
+    "#008cff",  # 5
+    "#0050ff",  # 10
+    "#001a8f",  # 20
+    "#2b006f",  # 30
+    "#5a008f",  # 50
+    "#8b00a8",  # 70
+    "#ff4fd8",  # 100+
+]
 
             cmap_p = ListedColormap(colors)
             norm_p = BoundaryNorm(bounds, cmap_p.N)
 
             cf_p = ax.contourf(
-                lons,
-                lats,
-                precip,
-                levels=bounds,
-                cmap=cmap_p,
-                norm=norm_p,
-                extend="max",
-                alpha=0.68,
-                transform=proj
-            )
+    lons,
+    lats,
+    precip,
+    levels=bounds,
+    cmap=cmap_p,
+    norm=norm_p,
+    extend="max",
+    alpha=0.82,
+    transform=proj
+)
 
             # Escala fina de precipitación.
             cax_p = fig.add_axes([0.925, 0.33, 0.018, 0.50])
