@@ -15,6 +15,7 @@ import cartopy.feature as cfeature
 from matplotlib.colors import ListedColormap, BoundaryNorm, LinearSegmentedColormap
 from matplotlib.ticker import FixedLocator
 from matplotlib.cm import ScalarMappable
+from scipy.ndimage import maximum_filter, minimum_filter
 
 logging.getLogger("cfgrib").setLevel(logging.ERROR)
 logging.getLogger("eccodes").setLevel(logging.ERROR)
@@ -500,23 +501,16 @@ def main():
     gl.xlabel_style = {"size": 7}
     gl.ylabel_style = {"size": 7}
 
-    ax.add_feature(cfeature.OCEAN.with_scale("50m"), facecolor="#9ecae1")
-    ax.add_feature(cfeature.LAND.with_scale("50m"), facecolor="#c2b280")
-    ax.add_feature(cfeature.LAKES.with_scale("50m"), facecolor="#9ecae1")
-    ax.add_feature(cfeature.COASTLINE.with_scale("50m"), linewidth=0.8)
-    ax.add_feature(cfeature.BORDERS.with_scale("50m"), linewidth=0.6)
+    # ---------------- FONDO CARTOGRÁFICO ESTILO ECMWF / METEORED ----------------
+    # Se dibuja con zorder bajo para que las capas meteorológicas queden encima.
+    ax.add_feature(cfeature.OCEAN.with_scale("50m"), facecolor="#a9c9e8", zorder=0)
+    ax.add_feature(cfeature.LAND.with_scale("50m"), facecolor="#e8c7ae", zorder=0)
+    ax.add_feature(cfeature.LAKES.with_scale("50m"), facecolor="#a9c9e8", zorder=0)
 
-    try:
-        prov = cfeature.NaturalEarthFeature(
-            "cultural",
-            "admin_1_states_provinces_lines",
-            "50m",
-            edgecolor="gray",
-            facecolor="none"
-        )
-        ax.add_feature(prov, linewidth=0.4)
-    except Exception:
-        pass
+    # Las costas, fronteras y provincias se vuelven a dibujar más abajo, por encima
+    # de la precipitación. Acá quedan como base inicial.
+    ax.add_feature(cfeature.COASTLINE.with_scale("50m"), linewidth=0.7, edgecolor="#ffffff", zorder=3)
+    ax.add_feature(cfeature.BORDERS.with_scale("50m"), linewidth=0.45, edgecolor="#5c4738", zorder=3)
 
     # ---------------- NUBOSIDAD TOTAL / CIELO CUBIERTO ----------------
     cmap_nub = ListedColormap([
@@ -540,9 +534,10 @@ def main():
                 levels=niveles_nub,
                 cmap=cmap_nub,
                 norm=norm_nub,
-                alpha=0.42,
+                alpha=0.36,
                 transform=proj,
-                extend="max"
+                extend="max",
+                zorder=1
             )
             print("✔ Nubosidad / cielo cubierto dibujado.")
         except Exception as e:
@@ -550,38 +545,56 @@ def main():
     else:
         print("⚠ No se dibuja nubosidad porque no fue cargada.")
 
-    # ---------------- PRECIPITACIÓN SUAVE ----------------
+    # ---------------- PRECIPITACIÓN ESTILO ECMWF / METEORED ----------------
+    # Importante: zorder bajo + alpha moderado. Así la precipitación NO tapa
+    # límites, isobaras, espesores, contornos de nieve ni barbas de viento.
     if precip is not None:
         try:
-            bounds = [0.2, 0.5, 1, 2, 5, 10, 20, 30, 50, 70, 100, 150]
+            bounds = [
+                0.2, 0.5, 1, 2, 3, 4, 5,
+                10, 15, 20, 25, 30, 35, 40, 45, 50,
+                60, 70, 80, 100, 120, 150
+            ]
+
             colors = [
-    "#e8ffff",  # 0.2
-    "#9ffcff",  # 0.5
-    "#45e8ff",  # 1
-    "#00bfff",  # 2
-    "#008cff",  # 5
-    "#0050ff",  # 10
-    "#001a8f",  # 20
-    "#2b006f",  # 30
-    "#5a008f",  # 50
-    "#8b00a8",  # 70
-    "#ff4fd8",  # 100+
-]
+                "#dffcff",
+                "#a8f6ff",
+                "#63eaff",
+                "#28cfff",
+                "#149cff",
+                "#006dff",
+                "#003cff",
+                "#1717c8",
+                "#1b007a",
+                "#3b006f",
+                "#5a008c",
+                "#7b20a3",
+                "#9b45bd",
+                "#c261d0",
+                "#f07bd8",
+                "#ff9bbb",
+                "#ff6b75",
+                "#e60000",
+                "#b80000",
+                "#7a1e1e",
+                "#4a1a1a",
+            ]
 
             cmap_p = ListedColormap(colors)
             norm_p = BoundaryNorm(bounds, cmap_p.N)
 
             cf_p = ax.contourf(
-    lons,
-    lats,
-    precip,
-    levels=bounds,
-    cmap=cmap_p,
-    norm=norm_p,
-    extend="max",
-    alpha=0.82,
-    transform=proj
-)
+                lons,
+                lats,
+                precip,
+                levels=bounds,
+                cmap=cmap_p,
+                norm=norm_p,
+                extend="max",
+                alpha=0.60,
+                transform=proj,
+                zorder=2
+            )
 
             # Escala fina de precipitación.
             cax_p = fig.add_axes([0.925, 0.33, 0.018, 0.50])
@@ -597,6 +610,23 @@ def main():
 
         except Exception as e:
             print(f"⚠ Error al dibujar precipitación: {e}")
+
+    # ---------------- LÍMITES SOBRE CAPAS METEOROLÓGICAS ----------------
+    # Se dibujan DESPUÉS de la precipitación para que no desaparezcan.
+    try:
+        provincias = cfeature.NaturalEarthFeature(
+            "cultural",
+            "admin_1_states_provinces_lines",
+            "10m",
+            edgecolor="#5c4738",
+            facecolor="none"
+        )
+        ax.add_feature(provincias, linewidth=0.55, alpha=0.95, zorder=7)
+    except Exception as e:
+        print(f"⚠ No se pudieron dibujar límites provinciales: {e}")
+
+    ax.add_feature(cfeature.COASTLINE.with_scale("50m"), linewidth=0.8, edgecolor="#ffffff", zorder=7)
+    ax.add_feature(cfeature.BORDERS.with_scale("50m"), linewidth=0.55, edgecolor="#4d3a2f", zorder=7)
 
     # ---------------- ESCALA FINA DE NUBOSIDAD ----------------
     try:
@@ -634,7 +664,7 @@ def main():
                 linewidths=0.9,
                 linestyles="-",
                 transform=proj,
-                zorder=6
+                zorder=8
             )
 
             ax.clabel(
@@ -664,7 +694,8 @@ def main():
                 colors="black",
                 linewidths=0.6,
                 linestyles="--",
-                transform=proj
+                transform=proj,
+                zorder=8
             )
 
             especiales = {
@@ -683,7 +714,8 @@ def main():
                         levels=[lvl],
                         colors=col,
                         linewidths=1.4,
-                        transform=proj
+                        transform=proj,
+                        zorder=9
                     )
                     ax.clabel(c, inline=True, fontsize=7, fmt="%.0f")
 
@@ -703,12 +735,16 @@ def main():
             levels=niveles_mslp,
             colors="black",
             linewidths=0.9,
-            transform=proj
+            transform=proj,
+            zorder=10
         )
         ax.clabel(cs, inline=True, fontsize=7, fmt="%.0f")
 
     except Exception as e:
         print(f"⚠ Error al dibujar MSLP: {e}")
+
+
+
 
     # ---------------- VIENTO 10 m > 15 kt ----------------
     if u10 is not None and v10 is not None:
@@ -734,7 +770,8 @@ def main():
                 v_plot[::paso, ::paso],
                 length=5,
                 linewidth=0.5,
-                transform=proj
+                transform=proj,
+                zorder=11
             )
 
         except Exception as e:
