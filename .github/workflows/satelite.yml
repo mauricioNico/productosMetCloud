@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
   schedule:
-    - cron: "0 */3 * * *"
+    - cron: "0 */2 * * *"
 
 jobs:
   loop-satelital:
@@ -39,19 +39,19 @@ jobs:
         run: |
           mvn clean package
 
-      - name: Descargar 10 imagenes cada 17 minutos
+      - name: Descargar 6 imagenes cada 17 minutos
         env:
           SAT_USER: ${{ secrets.SAT_USER }}
           SAT_PASSWORD: ${{ secrets.SAT_PASSWORD }}
         run: |
           mkdir -p satelite
 
-          for i in {1..10}
+          for i in {1..6}
           do
-            echo "Descargando imagen $i de 10..."
+            echo "Descargando imagen $i de 6..."
             python python/descargar_satelite.py
 
-            if [ "$i" -lt 10 ]; then
+            if [ "$i" -lt 6 ]; then
               echo "Esperando 17 minutos..."
               sleep 1020
             fi
@@ -64,6 +64,11 @@ jobs:
         run: |
           mkdir -p loops
           java -jar target/generador-cartas-gfs-1.0.0-gif.jar satelite loops 1000
+
+      - name: Ver tamaño del GIF
+        run: |
+          echo "Archivos generados:"
+          ls -lh loops
 
       - name: Subir loop satelital
         if: always()
