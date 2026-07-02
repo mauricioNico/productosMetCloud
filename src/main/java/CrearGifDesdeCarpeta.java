@@ -1,79 +1,166 @@
-name: Generar loop satelital
+import javax.imageio.*;
+import javax.imageio.metadata.*;
+import javax.imageio.stream.ImageOutputStream;
+import java.awt.image.BufferedImage;
+import java.io.File;
+import java.util.Arrays;
+import java.util.List;
 
-concurrency:
-  group: satelite
-  cancel-in-progress: false
+public class CrearGifDesdeCarpeta {
 
-on:
-  workflow_dispatch:
+    public static void main(String[] args) throws Exception {
 
-  schedule:
-    - cron: "0 */2 * * *"
+        if (args.length < 1) {
+            System.out.println("Uso: java -jar generador-gif.jar carpetaImagenes [carpetaSalida] [delayMs]");
+            return;
+        }
 
-jobs:
-  loop-satelital:
-    runs-on: ubuntu-latest
-    timeout-minutes: 180
+        File carpeta = new File(args[0]);
 
-    steps:
-      - name: Descargar repositorio
-        uses: actions/checkout@v4
+        File carpetaSalida = args.length >= 2
+                ? new File(args[1])
+                : new File("loops");
 
-      - name: Instalar Java 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: 17
+        int delayMs = args.length >= 3
+                ? Integer.parseInt(args[2])
+                : 1000;
 
-      - name: Instalar Python 3.11
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
+        carpetaSalida.mkdirs();
 
-      - name: Instalar requests
-        run: |
-          python -m pip install --upgrade pip
-          pip install requests
+        String fechaHora = java.time.LocalDateTime.now()
+                .format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
 
-      - name: Compilar proyecto Java
-        run: |
-          mvn clean package
+        File salida = new File(
+                carpetaSalida,
+                "animacion_satelite_" + fechaHora + ".gif"
+        );
 
-      - name: Descargar 6 imagenes cada 17 minutos
-        env:
-          SAT_USER: ${{ secrets.SAT_USER }}
-          SAT_PASSWORD: ${{ secrets.SAT_PASSWORD }}
-        run: |
-          mkdir -p satelite
+        File[] archivos = carpeta.listFiles();
 
-          for i in {1..6}
-          do
-            echo "Descargando imagen $i de 6..."
-            python python/descargar_satelite.py
+        if (archivos == null) {
+            System.out.println("No se pudo leer la carpeta: " + carpeta.getAbsolutePath());
+            return;
+        }
 
-            if [ "$i" -lt 6 ]; then
-              echo "Esperando 17 minutos..."
-              sleep 1020
-            fi
-          done
+        List<File> imagenes = Arrays.stream(archivos)
+                .filter(File::isFile)
+                .filter(f -> {
+                    String n = f.getName().toLowerCase();
+                    return n.endsWith(".png") || n.endsWith(".jpg") || n.endsWith(".jpeg");
+                })
+                .sorted()
+                .toList();
 
-          echo "Imagenes descargadas:"
-          ls -lh satelite
+        if (imagenes.isEmpty()) {
+            System.out.println("No se encontraron imágenes.");
+            return;
+        }
 
-      - name: Generar GIF satelital
-        run: |
-          mkdir -p loops
-          java -jar target/generador-cartas-gfs-1.0.0-gif.jar satelite loops 1000
+        System.out.println("Imágenes encontradas: " + imagenes.size());
 
-      - name: Ver tamaño del GIF
-        run: |
-          echo "Archivos generados:"
-          ls -lh loops
+        ImageWriter writer = ImageIO.getImageWritersBySuffix("gif").next();
 
-      - name: Subir loop satelital
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: loop-satelital
-          path: loops/
-          retention-days: 7
+        int imagenesValidas = 0;
+        int imagenesOmitidas = 0;
+
+        try (ImageOutputStream output = ImageIO.createImageOutputStream(salida)) {
+
+            writer.setOutput(output);
+            writer.prepareWriteSequence(null);
+
+            for (File archivo : imagenes) {
+
+                BufferedImage imagen;
+
+                try {
+                    imagen = ImageIO.read(archivo);
+
+                    if (imagen == null) {
+                        System.out.println("⚠ Imagen inválida, se omite: " + archivo.getName());
+                        imagenesOmitidas++;
+                        continue;
+                    }
+
+                } catch (Exception e) {
+                    System.out.println("⚠ Error leyendo imagen, se omite: " + archivo.getName());
+                    System.out.println("  " + e.getMessage());
+                    imagenesOmitidas++;
+                    continue;
+                }
+
+                ImageWriteParam params = writer.getDefaultWriteParam();
+                IIOMetadata metadata = writer.getDefaultImageMetadata(
+                        new ImageTypeSpecifier(imagen), params
+                );
+
+                configurarMetadata(metadata, delayMs);
+
+                IIOImage frame = new IIOImage(imagen, null, metadata);
+                writer.writeToSequence(frame, params);
+
+                imagenesValidas++;
+                System.out.println("✔ Frame agregado: " + archivo.getName());
+            }
+
+            writer.endWriteSequence();
+        }
+
+        if (imagenesValidas == 0) {
+            System.out.println("❌ No hubo imágenes válidas. Se elimina GIF vacío.");
+            salida.delete();
+            return;
+        }
+
+        System.out.println("===================================");
+        System.out.println("GIF generado correctamente:");
+        System.out.println(salida.getAbsolutePath());
+        System.out.println("Imágenes válidas:  " + imagenesValidas);
+        System.out.println("Imágenes omitidas: " + imagenesOmitidas);
+        System.out.println("===================================");
+    }
+
+    private static void configurarMetadata(IIOMetadata metadata, int delayMs) throws Exception {
+
+        String format = metadata.getNativeMetadataFormatName();
+
+        IIOMetadataNode root = (IIOMetadataNode) metadata.getAsTree(format);
+
+        IIOMetadataNode graphicControlExtension =
+                getNode(root, "GraphicControlExtension");
+
+        graphicControlExtension.setAttribute("disposalMethod", "none");
+        graphicControlExtension.setAttribute("userInputFlag", "FALSE");
+        graphicControlExtension.setAttribute("transparentColorFlag", "FALSE");
+        graphicControlExtension.setAttribute("delayTime", String.valueOf(delayMs / 10));
+        graphicControlExtension.setAttribute("transparentColorIndex", "0");
+
+        IIOMetadataNode appExtensions =
+                getNode(root, "ApplicationExtensions");
+
+        IIOMetadataNode appExtension =
+                new IIOMetadataNode("ApplicationExtension");
+
+        appExtension.setAttribute("applicationID", "NETSCAPE");
+        appExtension.setAttribute("authenticationCode", "2.0");
+
+        byte[] loop = new byte[]{0x1, 0x0, 0x0};
+        appExtension.setUserObject(loop);
+
+        appExtensions.appendChild(appExtension);
+
+        metadata.setFromTree(format, root);
+    }
+
+    private static IIOMetadataNode getNode(IIOMetadataNode rootNode, String nodeName) {
+
+        for (int i = 0; i < rootNode.getLength(); i++) {
+            if (rootNode.item(i).getNodeName().equalsIgnoreCase(nodeName)) {
+                return (IIOMetadataNode) rootNode.item(i);
+            }
+        }
+
+        IIOMetadataNode node = new IIOMetadataNode(nodeName);
+        rootNode.appendChild(node);
+        return node;
+    }
+}
