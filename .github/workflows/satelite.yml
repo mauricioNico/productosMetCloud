@@ -35,6 +35,32 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests
 
+      - name: Verificar secrets y acceso al login
+        env:
+          SAT_USER: ${{ secrets.SAT_USER }}
+          SAT_PASSWORD: ${{ secrets.SAT_PASSWORD }}
+        run: |
+          echo "SAT_USER largo: ${#SAT_USER}"
+          echo "SAT_PASSWORD largo: ${#SAT_PASSWORD}"
+
+          python - <<'PY'
+          import requests
+
+          url = "https://imagenesmeteorologicas.faa.mil.ar/app/model/login.php"
+
+          try:
+              r = requests.get(url, timeout=30)
+              print("Status:", r.status_code)
+              print("URL final:", r.url)
+              print("Primeros caracteres:", r.text[:300])
+          except Exception as e:
+              print("ERROR:", repr(e))
+          PY
+
+      - name: Mostrar primeras lineas del Java
+        run: |
+          sed -n '1,80p' src/main/java/CrearGifDesdeCarpeta.java
+
       - name: Compilar proyecto Java
         run: |
           mvn clean package
