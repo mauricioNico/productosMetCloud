@@ -31,22 +31,11 @@ public class DescargaGFSMenu {
             12, 24, 36, 48, 60, 72, 84
     );
 
-    // Región de descarga completa.
-    // IMPORTANTE: como la carta sur llega hasta -85, la descarga también debe llegar hasta -85.
-    // Si se descarga solo hasta -80, Python no tendrá datos para graficar de -80 a -85.
-    private static final double TOP_DESCARGA = -20.0;
-    private static final double BOTTOM_DESCARGA = -85.0;
+    // Región fija
+    private static final double TOP = -20.0;
+    private static final double BOTTOM = -80.0;
     private static final double LEFT = -95.0 + 360.0;
     private static final double RIGHT = -25.0 + 360.0;
-
-    // Regiones de salida para las cartas.
-    private static final RegionCarta REGION_NORTE = new RegionCarta("norte", -20.0, -55.0);
-    private static final RegionCarta REGION_SUR = new RegionCarta("sur", -45.0, -85.0);
-
-    private static final RegionCarta[] REGIONES_CARTAS = {
-            REGION_NORTE,
-            REGION_SUR
-    };
 
     // Si querés conservar los GRIB, cambiar a false
     private static final boolean BORRAR_GRIBS_AL_FINAL = true;
@@ -77,7 +66,7 @@ public class DescargaGFSMenu {
         String fecha = String.format("%04d%02d%02d",
                 hoy.getYear(), hoy.getMonthValue(), hoy.getDayOfMonth());
 
-        Integer ciclo = detectarCicloDisponible(fecha, TOP_DESCARGA, BOTTOM_DESCARGA, LEFT, RIGHT);
+        Integer ciclo = detectarCicloDisponible(fecha, TOP, BOTTOM, LEFT, RIGHT);
 
         if (ciclo == null) {
             System.out.println("⚠ No se encontró ciclo disponible para hoy (" + fecha + ").");
@@ -87,7 +76,7 @@ public class DescargaGFSMenu {
             fecha = String.format("%04d%02d%02d",
                     ayer.getYear(), ayer.getMonthValue(), ayer.getDayOfMonth());
 
-            ciclo = detectarCicloDisponible(fecha, TOP_DESCARGA, BOTTOM_DESCARGA, LEFT, RIGHT);
+            ciclo = detectarCicloDisponible(fecha, TOP, BOTTOM, LEFT, RIGHT);
 
             if (ciclo == null) {
                 System.out.println("❌ Tampoco se encontró ciclo disponible para ayer (" + fecha + ").");
@@ -124,15 +113,11 @@ public class DescargaGFSMenu {
         System.out.println("Cartas: " + HORAS_CARTAS);
         System.out.println("Carpeta cartas: " + carpetaCartas);
         System.out.println("Carpeta meteogramas: " + carpetaMeteogramas);
-        System.out.println("Región descarga:");
-        System.out.println("  Top    = " + TOP_DESCARGA);
-        System.out.println("  Bottom = " + BOTTOM_DESCARGA);
+        System.out.println("Región:");
+        System.out.println("  Top    = " + TOP);
+        System.out.println("  Bottom = " + BOTTOM);
         System.out.println("  Left   = " + LEFT);
         System.out.println("  Right  = " + RIGHT);
-        System.out.println("Regiones cartas:");
-        for (RegionCarta region : REGIONES_CARTAS) {
-            System.out.println("  " + region.nombre + " -> Top: " + region.top + " | Bottom: " + region.bottom);
-        }
         System.out.println("Borrar GRIB al final: " + (BORRAR_GRIBS_AL_FINAL ? "SI" : "NO"));
         System.out.println("================================");
 
@@ -165,8 +150,8 @@ public class DescargaGFSMenu {
                         fecha,
                         ciclo,
                         horaPron,
-                        TOP_DESCARGA,
-                        BOTTOM_DESCARGA,
+                        TOP,
+                        BOTTOM,
                         LEFT,
                         RIGHT,
                         debeGenerarCarta,
@@ -180,8 +165,11 @@ public class DescargaGFSMenu {
                 }
 
                 if (debeGenerarCarta) {
-                    cartasOk += resultado.cartasGeneradasOk;
-                    cartasFail += resultado.cartasGeneradasFail;
+                    if (resultado.cartaGenerada) {
+                        cartasOk++;
+                    } else {
+                        cartasFail++;
+                    }
                 }
 
             } catch (Exception e) {
@@ -234,14 +222,13 @@ public class DescargaGFSMenu {
         System.out.println("\n=== RESUMEN FINAL ===");
         System.out.println("Descargas OK:        " + descargasOk);
         System.out.println("Descargas con error: " + descargasFail);
-        System.out.println("Cartas OK:           " + cartasOk + " (2 por cada hora seleccionada)");
+        System.out.println("Cartas OK:           " + cartasOk);
         System.out.println("Cartas con error:    " + cartasFail);
         System.out.println("Meteogramas OK:      " + meteogramasOk);
         System.out.println("Meteogramas error:   " + meteogramasFail);
         System.out.println("Carpeta cartas:      " + carpetaCartas);
         System.out.println("  → Cortoplazo (12/24/36h): " + carpetaCartas + "/cortoplazo");
         System.out.println("  → Largo plazo (48-84h):   " + carpetaCartas + "/largo_plazo");
-        System.out.println("  → Cada hora seleccionada genera carta norte y carta sur.");
         System.out.println("Carpeta meteogramas: " + carpetaMeteogramas);
         System.out.println("Proceso terminado.");
     }
@@ -321,49 +308,41 @@ public class DescargaGFSMenu {
 
         if (!descargado) {
             System.out.println("❌ No se pudo obtener el archivo.");
-            return new ResultadoPronostico(false, 0, 0);
+            return new ResultadoPronostico(false, false);
         }
 
         if (!generarCarta) {
             System.out.println("ℹ GRIB descargado/conservado. No corresponde generar carta para f"
                     + String.format("%03d", horaPron));
-            return new ResultadoPronostico(true, 0, 0);
+            return new ResultadoPronostico(true, false);
         }
 
-        int cartasOk = 0;
-        int cartasFail = 0;
+        String pngSalida = carpetaCartas + "/" +
+                new File(archivoLocal).getName().replace(".grib2", ".png");
 
-        for (RegionCarta region : REGIONES_CARTAS) {
-            String nombreBase = new File(archivoLocal).getName().replace(".grib2", "");
-            String pngSalida = carpetaCartas + "/" + nombreBase + "_" + region.nombre + ".png";
-
-            if (Files.exists(Path.of(pngSalida))) {
-                System.out.println("✔ La carta ya existe para esa hora y región, no se vuelve a generar:");
-                System.out.println("  " + pngSalida);
-                cartasOk++;
-                continue;
-            }
-
-            boolean generado = generarMapaMSLPConPython(
-                    archivoLocal,
-                    pngSalida,
-                    region.top,
-                    region.bottom,
-                    left,
-                    right
-            );
-
-            if (generado) {
-                cartasOk++;
-                System.out.println("✔ Carta " + region.nombre + " generada.");
-                System.out.println("  Salida carta: " + pngSalida);
-            } else {
-                cartasFail++;
-                System.out.println("⚠ Falló carta " + region.nombre + ". Se conserva el GRIB para revisión: " + archivoLocal);
-            }
+        if (Files.exists(Path.of(pngSalida))) {
+            System.out.println("✔ La carta ya existe para esa hora, región y corrida, no se vuelve a generar:");
+            System.out.println("  " + pngSalida);
+            return new ResultadoPronostico(true, true);
         }
 
-        return new ResultadoPronostico(true, cartasOk, cartasFail);
+        boolean generado = generarMapaMSLPConPython(
+                archivoLocal,
+                pngSalida,
+                top,
+                bottom,
+                left,
+                right
+        );
+
+        if (generado) {
+            System.out.println("✔ Carta generada y GRIB conservado para meteogramas: " + archivoLocal);
+            System.out.println("  Salida carta: " + pngSalida);
+        } else {
+            System.out.println("⚠ Se conserva el GRIB para revisión: " + archivoLocal);
+        }
+
+        return new ResultadoPronostico(true, generado);
     }
 
     private static String construirNombreArchivoLocal(String fecha,
@@ -605,18 +584,6 @@ public class DescargaGFSMenu {
         }
     }
 
-    private static class RegionCarta {
-        String nombre;
-        double top;
-        double bottom;
-
-        RegionCarta(String nombre, double top, double bottom) {
-            this.nombre = nombre;
-            this.top = top;
-            this.bottom = bottom;
-        }
-    }
-
     private static class PuntoMeteograma {
         String nombre;
         double lat;
@@ -631,13 +598,11 @@ public class DescargaGFSMenu {
 
     private static class ResultadoPronostico {
         boolean descargado;
-        int cartasGeneradasOk;
-        int cartasGeneradasFail;
+        boolean cartaGenerada;
 
-        ResultadoPronostico(boolean descargado, int cartasGeneradasOk, int cartasGeneradasFail) {
+        ResultadoPronostico(boolean descargado, boolean cartaGenerada) {
             this.descargado = descargado;
-            this.cartasGeneradasOk = cartasGeneradasOk;
-            this.cartasGeneradasFail = cartasGeneradasFail;
+            this.cartaGenerada = cartaGenerada;
         }
     }
 }
