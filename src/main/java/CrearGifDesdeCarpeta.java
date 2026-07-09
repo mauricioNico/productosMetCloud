@@ -4,12 +4,18 @@ import javax.imageio.stream.ImageOutputStream;
 import java.awt.*;
 import java.awt.image.BufferedImage;
 import java.io.File;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
 public class CrearGifDesdeCarpeta {
 
     private static final long LIMITE_BYTES = 5L * 1024L * 1024L; // 5 MB
+
+    // Escalas que se prueban solo si el GIF supera los 5 MB.
+    private static final double[] ESCALAS = {
+            1.00, 0.98, 0.96, 0.94, 0.92, 0.90, 0.88, 0.85, 0.82, 0.80, 0.75, 0.70
+    };
 
     public static void main(String[] args) throws Exception {
 
@@ -61,25 +67,19 @@ public class CrearGifDesdeCarpeta {
                 "animacion_satelite_" + fechaHora + ".gif"
         );
 
-        double[] escalas = {
-                1.00, 0.98, 0.96, 0.94, 0.92, 0.90, 0.88, 0.85, 0.82, 0.80
-        };
-
         File mejorArchivo = null;
+        ResultadoGeneracion mejorResultado = null;
 
-        for (double escala : escalas) {
+        for (double escala : ESCALAS) {
 
             File salidaTemporal = new File(
                     carpetaSalida,
                     "temp_animacion_" + fechaHora + "_" + (int) (escala * 100) + ".gif"
             );
 
-            int[] resultado = generarGif(imagenes, salidaTemporal, delayMs, escala);
+            ResultadoGeneracion resultado = generarGif(imagenes, salidaTemporal, delayMs, escala);
 
-            int validas = resultado[0];
-            int omitidas = resultado[1];
-
-            if (validas == 0) {
+            if (resultado.framesValidos == 0) {
                 salidaTemporal.delete();
                 continue;
             }
@@ -89,6 +89,9 @@ public class CrearGifDesdeCarpeta {
             System.out.println("-----------------------------------");
             System.out.println("Prueba escala: " + (int) (escala * 100) + "%");
             System.out.println("Tamaño: " + formatoMB(peso));
+            System.out.println("Frames agregados: " + resultado.framesValidos);
+            System.out.println("Frames repetidos omitidos: " + resultado.framesRepetidos);
+            System.out.println("Imágenes inválidas omitidas: " + resultado.framesInvalidos);
             System.out.println("-----------------------------------");
 
             if (mejorArchivo == null || peso < mejorArchivo.length()) {
@@ -96,6 +99,7 @@ public class CrearGifDesdeCarpeta {
                     mejorArchivo.delete();
                 }
                 mejorArchivo = salidaTemporal;
+                mejorResultado = resultado;
             } else {
                 salidaTemporal.delete();
             }
@@ -114,15 +118,27 @@ public class CrearGifDesdeCarpeta {
             salidaFinal.delete();
         }
 
-        mejorArchivo.renameTo(salidaFinal);
+        boolean renombrado = mejorArchivo.renameTo(salidaFinal);
+
+        if (!renombrado) {
+            System.out.println("❌ No se pudo renombrar el archivo final.");
+            System.out.println("Archivo temporal generado: " + mejorArchivo.getAbsolutePath());
+            return;
+        }
 
         System.out.println("===================================");
         System.out.println("GIF generado correctamente:");
         System.out.println(salidaFinal.getAbsolutePath());
         System.out.println("Tamaño final: " + formatoMB(salidaFinal.length()));
 
+        if (mejorResultado != null) {
+            System.out.println("Frames finales: " + mejorResultado.framesValidos);
+            System.out.println("Frames repetidos omitidos: " + mejorResultado.framesRepetidos);
+            System.out.println("Imágenes inválidas omitidas: " + mejorResultado.framesInvalidos);
+        }
+
         if (salidaFinal.length() <= LIMITE_BYTES) {
-            System.out.println("Estado: OK, menor a 5 MB");
+            System.out.println("Estado: OK, menor o igual a 5 MB");
         } else {
             System.out.println("Estado: supera 5 MB, pero se usó la máxima reducción configurada");
         }
@@ -130,7 +146,7 @@ public class CrearGifDesdeCarpeta {
         System.out.println("===================================");
     }
 
-    private static int[] generarGif(
+    private static ResultadoGeneracion generarGif(
             List<File> imagenes,
             File salida,
             int delayMs,
@@ -139,8 +155,11 @@ public class CrearGifDesdeCarpeta {
 
         ImageWriter writer = ImageIO.getImageWritersBySuffix("gif").next();
 
-        int imagenesValidas = 0;
-        int imagenesOmitidas = 0;
+        int framesValidos = 0;
+        int framesRepetidos = 0;
+        int framesInvalidos = 0;
+
+        BufferedImage ultimaImagenAgregada = null;
 
         try (ImageOutputStream output = ImageIO.createImageOutputStream(salida)) {
 
@@ -156,18 +175,24 @@ public class CrearGifDesdeCarpeta {
 
                     if (imagen == null) {
                         System.out.println("⚠ Imagen inválida, se omite: " + archivo.getName());
-                        imagenesOmitidas++;
+                        framesInvalidos++;
                         continue;
                     }
 
                 } catch (Exception e) {
                     System.out.println("⚠ Error leyendo imagen, se omite: " + archivo.getName());
                     System.out.println("  " + e.getMessage());
-                    imagenesOmitidas++;
+                    framesInvalidos++;
                     continue;
                 }
 
                 BufferedImage optimizada = optimizarImagen(imagen, escala);
+
+                if (ultimaImagenAgregada != null && sonImagenesIguales(ultimaImagenAgregada, optimizada)) {
+                    System.out.println("↪ Frame repetido, se omite: " + archivo.getName());
+                    framesRepetidos++;
+                    continue;
+                }
 
                 ImageWriteParam params = writer.getDefaultWriteParam();
 
@@ -181,22 +206,24 @@ public class CrearGifDesdeCarpeta {
                 IIOImage frame = new IIOImage(optimizada, null, metadata);
                 writer.writeToSequence(frame, params);
 
-                imagenesValidas++;
+                ultimaImagenAgregada = optimizada;
+                framesValidos++;
+
                 System.out.println("✔ Frame agregado: " + archivo.getName());
             }
 
             writer.endWriteSequence();
+        } finally {
+            writer.dispose();
         }
 
-        writer.dispose();
-
-        return new int[]{imagenesValidas, imagenesOmitidas};
+        return new ResultadoGeneracion(framesValidos, framesRepetidos, framesInvalidos);
     }
 
     private static BufferedImage optimizarImagen(BufferedImage original, double escala) {
 
-        int ancho = Math.max(1, (int) (original.getWidth() * escala));
-        int alto = Math.max(1, (int) (original.getHeight() * escala));
+        int ancho = Math.max(1, (int) Math.round(original.getWidth() * escala));
+        int alto = Math.max(1, (int) Math.round(original.getHeight() * escala));
 
         BufferedImage escalada = new BufferedImage(
                 ancho,
@@ -209,9 +236,14 @@ public class CrearGifDesdeCarpeta {
                 RenderingHints.KEY_INTERPOLATION,
                 RenderingHints.VALUE_INTERPOLATION_BILINEAR
         );
+        g.setRenderingHint(
+                RenderingHints.KEY_RENDERING,
+                RenderingHints.VALUE_RENDER_QUALITY
+        );
         g.drawImage(original, 0, 0, ancho, alto, null);
         g.dispose();
 
+        // TYPE_BYTE_INDEXED fuerza una paleta apta para GIF y reduce el peso.
         BufferedImage indexada = new BufferedImage(
                 ancho,
                 alto,
@@ -223,6 +255,27 @@ public class CrearGifDesdeCarpeta {
         g2.dispose();
 
         return indexada;
+    }
+
+    private static boolean sonImagenesIguales(BufferedImage img1, BufferedImage img2) {
+
+        if (img1.getWidth() != img2.getWidth() || img1.getHeight() != img2.getHeight()) {
+            return false;
+        }
+
+        // Comparación por muestreo: suficiente para detectar frames satelitales repetidos.
+        // Paso 4 = compara 1 de cada 4 píxeles en cada eje.
+        int paso = 4;
+
+        for (int y = 0; y < img1.getHeight(); y += paso) {
+            for (int x = 0; x < img1.getWidth(); x += paso) {
+                if (img1.getRGB(x, y) != img2.getRGB(x, y)) {
+                    return false;
+                }
+            }
+        }
+
+        return true;
     }
 
     private static void configurarMetadata(IIOMetadata metadata, int delayMs) throws Exception {
@@ -273,5 +326,17 @@ public class CrearGifDesdeCarpeta {
     private static String formatoMB(long bytes) {
         double mb = bytes / 1024.0 / 1024.0;
         return String.format("%.2f MB", mb);
+    }
+
+    private static class ResultadoGeneracion {
+        int framesValidos;
+        int framesRepetidos;
+        int framesInvalidos;
+
+        ResultadoGeneracion(int framesValidos, int framesRepetidos, int framesInvalidos) {
+            this.framesValidos = framesValidos;
+            this.framesRepetidos = framesRepetidos;
+            this.framesInvalidos = framesInvalidos;
+        }
     }
 }
