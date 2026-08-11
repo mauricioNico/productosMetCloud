@@ -19,6 +19,8 @@ public class DescargaGFSMenu {
     private static final String PYTHON_CMD = "python";
 
     private static final String PYTHON_SCRIPT_MSLP = "python/mapa_mslp.py";
+    private static final String PYTHON_SCRIPT_500 = "python/mapa_500.py";
+    private static final String PYTHON_SCRIPT_200 = "python/mapa_200.py";
     private static final String PYTHON_SCRIPT_METEOGRAMA = "python/meteograma_gfs.py";
 
     // Descargar GRIB desde f000 hasta f084 cada 3 h
@@ -317,29 +319,27 @@ public class DescargaGFSMenu {
             return new ResultadoPronostico(true, false);
         }
 
-        String pngSalida = carpetaCartas + "/" +
-                new File(archivoLocal).getName().replace(".grib2", ".png");
+        String nombreBase = new File(archivoLocal).getName().replace(".grib2", "");
+        String salidaSfc = carpetaCartas + "/superficie/" + nombreBase + "_sfc.png";
+        String salida500 = carpetaCartas + "/500hPa/" + nombreBase + "_500hPa.png";
+        String salida200 = carpetaCartas + "/200hPa/" + nombreBase + "_200hPa.png";
 
-        if (Files.exists(Path.of(pngSalida))) {
-            System.out.println("✔ La carta ya existe para esa hora, región y corrida, no se vuelve a generar:");
-            System.out.println("  " + pngSalida);
-            return new ResultadoPronostico(true, true);
-        }
+        boolean sfcOk = generarMapaSiFalta(
+                PYTHON_SCRIPT_MSLP, "superficie", archivoLocal, salidaSfc,
+                top, bottom, left, right);
+        boolean h500Ok = generarMapaSiFalta(
+                PYTHON_SCRIPT_500, "500 hPa", archivoLocal, salida500,
+                top, bottom, left, right);
+        boolean h200Ok = generarMapaSiFalta(
+                PYTHON_SCRIPT_200, "200 hPa", archivoLocal, salida200,
+                top, bottom, left, right);
 
-        boolean generado = generarMapaMSLPConPython(
-                archivoLocal,
-                pngSalida,
-                top,
-                bottom,
-                left,
-                right
-        );
-
+        boolean generado = sfcOk && h500Ok && h200Ok;
         if (generado) {
-            System.out.println("✔ Carta generada y GRIB conservado para meteogramas: " + archivoLocal);
-            System.out.println("  Salida carta: " + pngSalida);
+            System.out.println("✔ Tres cartas generadas; GRIB conservado para meteogramas: " + archivoLocal);
         } else {
-            System.out.println("⚠ Se conserva el GRIB para revisión: " + archivoLocal);
+            System.out.println("⚠ Alguna carta falló. Se conserva el GRIB para revisión: " + archivoLocal);
+            System.out.println("  Superficie=" + sfcOk + " | 500 hPa=" + h500Ok + " | 200 hPa=" + h200Ok);
         }
 
         return new ResultadoPronostico(true, generado);
@@ -437,21 +437,33 @@ public class DescargaGFSMenu {
         return true;
     }
 
-    private static boolean generarMapaMSLPConPython(String nombreGrib,
-                                                    String salidaPNG,
-                                                    double top,
-                                                    double bottom,
-                                                    double left,
-                                                    double right) {
+    private static boolean generarMapaSiFalta(String scriptPython,
+                                              String producto,
+                                              String nombreGrib,
+                                              String salidaPNG,
+                                              double top,
+                                              double bottom,
+                                              double left,
+                                              double right) {
+
+        if (Files.exists(Path.of(salidaPNG))) {
+            System.out.println("✔ La carta de " + producto + " ya existe: " + salidaPNG);
+            return true;
+        }
+
+        File padre = new File(salidaPNG).getParentFile();
+        if (padre != null) {
+            padre.mkdirs();
+        }
 
         try {
-            System.out.println("▶ Generando carta con Python...");
+            System.out.println("▶ Generando carta de " + producto + " con Python...");
             System.out.println("  Usando Python: " + PYTHON_CMD);
             System.out.println("  Salida: " + salidaPNG);
 
             ProcessBuilder pb = new ProcessBuilder(
                     PYTHON_CMD,
-                    PYTHON_SCRIPT_MSLP,
+                    scriptPython,
                     nombreGrib,
                     salidaPNG,
                     String.valueOf(top),
@@ -467,10 +479,10 @@ public class DescargaGFSMenu {
             int exit = p.waitFor();
 
             if (exit == 0) {
-                System.out.println("✔ Carta generada: " + salidaPNG);
+                System.out.println("✔ Carta de " + producto + " generada: " + salidaPNG);
                 return true;
             } else {
-                System.out.println("❌ Error al generar carta (exit=" + exit + ")");
+                System.out.println("❌ Error al generar carta de " + producto + " (exit=" + exit + ")");
                 return false;
             }
 
