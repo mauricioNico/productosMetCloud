@@ -123,7 +123,6 @@ def main():
         arrowstyle="->",
         minlength=0.15,
         maxlength=4.0,
-        transform=proy,
         zorder=6,
     )
     # Refuerza el orden de dibujo en distintas versiones de Matplotlib/Cartopy.
@@ -148,7 +147,14 @@ def main():
                  f"Inicio: {fecha_es(inicio)} | Validez: {fecha_es(valida)} "
                  f"(H+{horas}, salida {ciclo_txt})", fontsize=11, fontweight="bold", pad=10)
 
-    plt.savefig(salida, dpi=150, bbox_inches="tight", pad_inches=0.02)
+    # No usar bbox_inches="tight" en este GeoAxes: al combinar longitudes
+    # normalizadas y streamplot puede recortar el mapa y dejar solo la colorbar.
+    plt.savefig(
+        salida,
+        dpi=150,
+        facecolor=fig.get_facecolor(),
+        edgecolor="none",
+    )
     plt.close(fig)
     print(f"✔ Carta de 200 hPa generada: {salida.resolve()}")
 
