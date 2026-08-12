@@ -41,6 +41,12 @@ def recortar(da, top, bottom, left, right):
     return da.sel(latitude=tramo_lat, longitude=slice(left, right)).squeeze(drop=True)
 
 
+def normalizar_longitudes(da):
+    """Convierte longitudes GFS 0..360 a -180..180 y las ordena para streamplot."""
+    lon = ((da.longitude + 180.0) % 360.0) - 180.0
+    return da.assign_coords(longitude=lon).sortby("longitude")
+
+
 def fechas(da):
     def convertir(valor):
         return dt.datetime.fromisoformat(np.datetime_as_string(np.asarray(valor).reshape(-1)[0], unit="h"))
@@ -70,6 +76,8 @@ def main():
     try:
         u = recortar(campo(abrir(archivo, "u"), {"u", "ugrd"}), top, bottom, left, right)
         v = recortar(campo(abrir(archivo, "v"), {"v", "vgrd"}), top, bottom, left, right)
+        u = normalizar_longitudes(u)
+        v = normalizar_longitudes(v)
     except Exception as exc:
         print(f"❌ No se pudieron leer los campos de viento de 200 hPa: {exc}")
         sys.exit(2)
@@ -80,10 +88,12 @@ def main():
     fig, ax = plt.subplots(figsize=(11.053, 9.053), subplot_kw={"projection": proy})
     fig.subplots_adjust(left=0.025, right=0.89, top=0.91, bottom=0.045)
     ax.set_facecolor("#f7f7f5")
-    ax.set_extent([left, right, bottom, top], crs=proy)
+    left_mapa = ((left + 180.0) % 360.0) - 180.0
+    right_mapa = ((right + 180.0) % 360.0) - 180.0
+    ax.set_extent([left_mapa, right_mapa, bottom, top], crs=proy)
 
     gl = ax.gridlines(draw_labels=True, linewidth=0.5, color="gray", linestyle="--", alpha=0.55)
-    gl.xlocator = FixedLocator(np.arange(left, right + 1, 10))
+    gl.xlocator = FixedLocator(np.arange(left_mapa, right_mapa + 1, 10))
     gl.ylocator = FixedLocator(np.arange(bottom, top + 1, 10))
     gl.top_labels = gl.right_labels = False
     gl.xlabel_style = gl.ylabel_style = {"size": 7}
@@ -101,10 +111,24 @@ def main():
     if lat[0] > lat[-1]:
         lat, u_arr, v_arr = lat[::-1], u_arr[::-1, :], v_arr[::-1, :]
     paso = 2
-    ax.streamplot(u.longitude.values[::paso], lat[::paso],
-                  u_arr[::paso, ::paso], v_arr[::paso, ::paso],
-                  density=1.45, color="#202020", linewidth=0.55,
-                  arrowsize=0.7, transform=proy, zorder=5)
+    corrientes = ax.streamplot(
+        u.longitude.values[::paso],
+        lat[::paso],
+        u_arr[::paso, ::paso],
+        v_arr[::paso, ::paso],
+        density=1.6,
+        color="#171717",
+        linewidth=0.75,
+        arrowsize=0.9,
+        arrowstyle="->",
+        minlength=0.15,
+        maxlength=4.0,
+        transform=proy,
+        zorder=6,
+    )
+    # Refuerza el orden de dibujo en distintas versiones de Matplotlib/Cartopy.
+    corrientes.lines.set_zorder(6)
+    corrientes.arrows.set_zorder(6)
 
     provincias = cfeature.NaturalEarthFeature("cultural", "admin_1_states_provinces_lines", "10m",
                                                edgecolor="#555555", facecolor="none")
