@@ -12,7 +12,7 @@ import cartopy.feature as cfeature
 import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
-from matplotlib.colors import BoundaryNorm, ListedColormap
+from matplotlib.colors import BoundaryNorm, LinearSegmentedColormap, ListedColormap
 from matplotlib.ticker import FixedLocator
 
 logging.getLogger("cfgrib").setLevel(logging.ERROR)
@@ -64,6 +64,31 @@ def fecha_es(valor):
     return f"{dias[valor.weekday()]} {valor.day:02d} {meses[valor.month - 1]} {valor.year}, {valor:%H} UTC"
 
 
+def agregar_fondo_gradiente(fig):
+    """Agrega el mismo fondo azul utilizado en las cartas de superficie y 500 hPa."""
+    eje_fondo = fig.add_axes([0, 0, 1, 1], zorder=-10)
+    eje_fondo.set_axis_off()
+
+    gradiente = np.linspace(0, 1, 512).reshape(512, 1)
+    cmap_fondo = LinearSegmentedColormap.from_list(
+        "fondo_gradiente_200",
+        [
+            (0.00, "#6db3f2"),
+            (0.37, "#54a3ee"),
+            (0.64, "#54a3ee"),
+            (1.00, "#1e69de"),
+        ],
+    )
+
+    eje_fondo.imshow(
+        gradiente,
+        aspect="auto",
+        cmap=cmap_fondo,
+        origin="upper",
+        extent=[0, 1, 0, 1],
+    )
+
+
 def main():
     if len(sys.argv) != 7:
         print("Uso: mapa_200.py archivo.grib2 salida.png top bottom left right")
@@ -82,11 +107,15 @@ def main():
         print(f"❌ No se pudieron leer los campos de viento de 200 hPa: {exc}")
         sys.exit(2)
 
-    velocidad = np.hypot(u, v)  # m/s
+    # Los componentes U y V del GFS vienen en m/s. Para una carta aeronáutica
+    # las isotacas se expresan en nudos (kt).
+    velocidad = np.hypot(u, v) * 1.94384
     inicio, valida, horas = fechas(u)
     proy = ccrs.PlateCarree()
     fig, ax = plt.subplots(figsize=(11.053, 9.053), subplot_kw={"projection": proy})
-    fig.subplots_adjust(left=0.025, right=0.89, top=0.91, bottom=0.045)
+    fig.subplots_adjust(left=0.045, right=0.875, top=0.895, bottom=0.045)
+    fig.patch.set_alpha(0.0)
+    agregar_fondo_gradiente(fig)
     ax.set_facecolor("#f7f7f5")
     left_mapa = ((left + 180.0) % 360.0) - 180.0
     right_mapa = ((right + 180.0) % 360.0) - 180.0
@@ -98,7 +127,7 @@ def main():
     gl.top_labels = gl.right_labels = False
     gl.xlabel_style = gl.ylabel_style = {"size": 7}
 
-    niveles = [30, 40, 50, 60, 70, 80, 90, 100]
+    niveles = [60, 80, 100, 120, 140, 160, 180, 200]
     cmap = ListedColormap(["#d9f0f3", "#a6dcef", "#62bde5", "#2595cf",
                            "#116fb5", "#084b8a", "#3f1b78"])
     norm = BoundaryNorm(niveles, cmap.N)
@@ -137,15 +166,44 @@ def main():
 
     cax = fig.add_axes([0.91, 0.18, 0.022, 0.58])
     barra = fig.colorbar(isotacas, cax=cax, ticks=niveles)
-    barra.set_label("Velocidad del viento en 200 hPa (m/s)", fontsize=9)
+    barra.set_label("Velocidad del viento en 200 hPa (kt)", fontsize=9)
     barra.ax.tick_params(labelsize=7)
 
     ciclo = re.search(r"_(\d{2})_f", archivo.name)
     ciclo_txt = f"{ciclo.group(1)}Z" if ciclo else "??Z"
-    ax.set_title("Departamento Meteorología Militar\n"
-                 "200 hPa: líneas de corriente e isotacas (corriente en chorro)\n"
-                 f"Inicio: {fecha_es(inicio)} | Validez: {fecha_es(valida)} "
-                 f"(H+{horas}, salida {ciclo_txt})", fontsize=11, fontweight="bold", pad=10)
+    # Encabezado fijado a la figura para que streamplot/Cartopy no lo desplace
+    # ni lo omita al recalcular la geometría del GeoAxes.
+    fig.text(
+        0.46,
+        0.974,
+        "Departamento Meteorología Militar",
+        ha="center",
+        va="top",
+        fontsize=11,
+        fontweight="bold",
+        color="black",
+    )
+    fig.text(
+        0.46,
+        0.953,
+        "200 hPa: líneas de corriente e isotacas (corriente en chorro)",
+        ha="center",
+        va="top",
+        fontsize=11,
+        fontweight="bold",
+        color="black",
+    )
+    fig.text(
+        0.46,
+        0.932,
+        f"Inicio: {fecha_es(inicio)} | Validez: {fecha_es(valida)} "
+        f"(H+{horas}, salida {ciclo_txt})",
+        ha="center",
+        va="top",
+        fontsize=10.5,
+        fontweight="bold",
+        color="black",
+    )
 
     # No usar bbox_inches="tight" en este GeoAxes: al combinar longitudes
     # normalizadas y streamplot puede recortar el mapa y dejar solo la colorbar.
