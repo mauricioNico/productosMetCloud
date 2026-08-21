@@ -11,23 +11,29 @@ jobs:
       - name: Descargar repositorio
         uses: actions/checkout@v4
 
-      - name: Instalar Java 17
-        uses: actions/setup-java@v4
+      - name: Instalar Python
+        uses: actions/setup-python@v5
         with:
-          distribution: temurin
-          java-version: 17
+          python-version: "3.11"
+
+      - name: Instalar Pillow
+        shell: powershell
+        run: |
+          python -m pip install --upgrade pip
+          pip install pillow
 
       - name: Crear carpeta de trabajo
         shell: powershell
         run: |
-          $fecha = Get-Date -Format "yyyyMMdd"
-          echo "FECHA=$fecha" >> $env:GITHUB_ENV
-          New-Item -ItemType Directory -Force -Path "$fecha\ARG_INFR"
+          New-Item -ItemType Directory -Force -Path "ARG_INFR"
+          New-Item -ItemType Directory -Force -Path "salida"
 
       - name: Descargar ultimas 6 imagenes de ClimaSur
         shell: powershell
         run: |
           $pagina = "https://www.climasurgba.com.ar/satelite/goes-topes-nubosos"
+
+          Write-Host "Consultando ClimaSur..."
 
           $html = (Invoke-WebRequest -Uri $pagina -UseBasicParsing).Content
 
@@ -52,6 +58,8 @@ jobs:
               throw "No se encontraron suficientes imagenes"
           }
 
+          # ClimaSur devuelve primero la imagen mas reciente.
+          # Invertimos para animar de la mas antigua a la mas nueva.
           [array]::Reverse($urls)
 
           Add-Type -AssemblyName System.Drawing
@@ -59,13 +67,16 @@ jobs:
           $contador = 1
 
           foreach ($url in $urls) {
+
               $numero = "{0:D2}" -f $contador
+
               $urlCompleta = "https://www.climasurgba.com.ar$url"
 
               $png = "goes_$numero.png"
-              $jpg = "$env:FECHA\ARG_INFR\goes_$numero.jpg"
+              $jpg = "ARG_INFR\goes_$numero.jpg"
 
-              Write-Host "Descargando $urlCompleta"
+              Write-Host "Descargando:"
+              Write-Host $urlCompleta
 
               Invoke-WebRequest `
                 -Uri $urlCompleta `
@@ -91,42 +102,71 @@ jobs:
               $contador++
           }
 
-      - name: Verificar estructura
-        shell: cmd
-        run: |
-          echo Fecha: %FECHA%
-          echo.
-          dir "%FECHA%\ARG_INFR"
-          echo.
-          dir loopSatelital.jar
-
-      - name: Generar animacion
-        shell: cmd
-        run: |
-          java -jar loopSatelital.jar /ARG_INFR/
-
-      - name: Buscar GIF generado
+      - name: Verificar imagenes
         shell: powershell
         run: |
-          Write-Host "GIF encontrados:"
-          Get-ChildItem -Path . -Recurse -Filter *.gif
+          Write-Host "Imagenes disponibles para la animacion:"
+          Get-ChildItem ARG_INFR\*.jpg
 
-      - name: Preparar GIF para descarga
+      - name: Generar GIF animado
         shell: powershell
         run: |
-          New-Item -ItemType Directory -Force -Path salida
+          @'
+          from PIL import Image
+          from pathlib import Path
 
-          $gif = Get-ChildItem -Path . -Recurse -Filter *.gif |
-                 Sort-Object LastWriteTime -Descending |
-                 Select-Object -First 1
+          carpeta = Path("ARG_INFR")
+          salida = Path("salida/loop_climasur.gif")
 
-          if (-not $gif) {
-              throw "No se encontro ningun GIF generado"
+          archivos = sorted(carpeta.glob("goes_*.jpg"))
+
+          print("Imagenes encontradas:", len(archivos))
+
+          if len(archivos) < 2:
+              raise Exception("No hay suficientes imagenes para crear el GIF")
+
+          frames = []
+
+          for archivo in archivos:
+              print("Procesando:", archivo)
+              imagen = Image.open(archivo).convert("RGB")
+              frames.append(imagen)
+
+          frames[0].save(
+              salida,
+              save_all=True,
+              append_images=frames[1:],
+              duration=600,
+              loop=0,
+              optimize=True
+          )
+
+          print("GIF generado:", salida)
+          print("Tamaño:", salida.stat().st_size, "bytes")
+          '@ | python
+
+      - name: Verificar tamaño del GIF
+        shell: powershell
+        run: |
+          $gif = Get-Item "salida\loop_climasur.gif"
+
+          $bytes = $gif.Length
+          $mb = [math]::Round($bytes / 1MB, 2)
+
+          Write-Host "=========================================="
+          Write-Host "GIF generado correctamente"
+          Write-Host "=========================================="
+          Write-Host "Archivo: $($gif.Name)"
+          Write-Host "Tamaño: $mb MB"
+          Write-Host "=========================================="
+
+          if ($bytes -gt 5MB) {
+              Write-Host "ADVERTENCIA:"
+              Write-Host "El GIF supera los 5 MB."
           }
-
-          Copy-Item `
-            $gif.FullName `
-            "salida\loop_climasur.gif"
+          else {
+              Write-Host "El GIF esta por debajo de 5 MB."
+          }
 
       - name: Subir GIF como artifact
         uses: actions/upload-artifact@v4
