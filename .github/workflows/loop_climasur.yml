@@ -22,7 +22,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install pillow
 
-      - name: Crear carpeta de trabajo
+      - name: Crear carpetas de trabajo
         shell: powershell
         run: |
           New-Item -ItemType Directory -Force -Path "ARG_INFR"
@@ -33,7 +33,9 @@ jobs:
         run: |
           $pagina = "https://www.climasurgba.com.ar/satelite/goes-topes-nubosos"
 
-          Write-Host "Consultando ClimaSur..."
+          Write-Host "=========================================="
+          Write-Host "Consultando ClimaSur"
+          Write-Host "=========================================="
 
           $html = (Invoke-WebRequest -Uri $pagina -UseBasicParsing).Content
 
@@ -58,8 +60,12 @@ jobs:
               throw "No se encontraron suficientes imagenes"
           }
 
-          # ClimaSur devuelve primero la imagen mas reciente.
-          # Invertimos para animar de la mas antigua a la mas nueva.
+          Write-Host "Imagenes seleccionadas: $($urls.Count)"
+
+          # ClimaSur muestra primero la imagen mas reciente.
+          # Invertimos para animar desde la mas antigua
+          # hacia la mas reciente.
+
           [array]::Reverse($urls)
 
           Add-Type -AssemblyName System.Drawing
@@ -73,9 +79,11 @@ jobs:
               $urlCompleta = "https://www.climasurgba.com.ar$url"
 
               $png = "goes_$numero.png"
+
               $jpg = "ARG_INFR\goes_$numero.jpg"
 
-              Write-Host "Descargando:"
+              Write-Host ""
+              Write-Host "Descargando imagen $contador de $($urls.Count)"
               Write-Host $urlCompleta
 
               Invoke-WebRequest `
@@ -102,11 +110,23 @@ jobs:
               $contador++
           }
 
-      - name: Verificar imagenes
+      - name: Verificar imagenes descargadas
         shell: powershell
         run: |
-          Write-Host "Imagenes disponibles para la animacion:"
-          Get-ChildItem ARG_INFR\*.jpg
+          Write-Host "=========================================="
+          Write-Host "IMAGENES PARA LA ANIMACION"
+          Write-Host "=========================================="
+
+          $imagenes = Get-ChildItem "ARG_INFR\*.jpg"
+
+          $imagenes | Format-Table Name, Length
+
+          Write-Host ""
+          Write-Host "Total de imagenes: $($imagenes.Count)"
+
+          if ($imagenes.Count -lt 2) {
+              throw "No hay suficientes imagenes para generar el GIF"
+          }
 
       - name: Generar GIF animado
         shell: powershell
@@ -120,53 +140,142 @@ jobs:
 
           archivos = sorted(carpeta.glob("goes_*.jpg"))
 
+          print("==========================================")
+          print("GENERANDO GIF")
+          print("==========================================")
+          print()
+
           print("Imagenes encontradas:", len(archivos))
+          print()
 
           if len(archivos) < 2:
-              raise Exception("No hay suficientes imagenes para crear el GIF")
+              raise Exception(
+                  "No hay suficientes imagenes para crear el GIF"
+              )
 
           frames = []
 
           for archivo in archivos:
+
               print("Procesando:", archivo)
+
               imagen = Image.open(archivo).convert("RGB")
+
+              imagen = imagen.quantize(
+                  colors=256,
+                  method=Image.Quantize.MEDIANCUT
+              )
+
               frames.append(imagen)
+
+          print()
+          print("Guardando GIF...")
 
           frames[0].save(
               salida,
+              format="GIF",
               save_all=True,
               append_images=frames[1:],
               duration=600,
               loop=0,
-              optimize=True
+              optimize=True,
+              disposal=2
           )
 
-          print("GIF generado:", salida)
-          print("Tamaño:", salida.stat().st_size, "bytes")
+          print()
+          print("GIF generado:")
+          print(salida)
+
+          print()
+          print("Tamanio:")
+          print(salida.stat().st_size, "bytes")
+
+          # ==========================================
+          # VERIFICAR QUE SEA UN GIF REAL
+          # ==========================================
+
+          with open(salida, "rb") as archivo:
+
+              cabecera = archivo.read(6)
+
+          print()
+          print("Cabecera del archivo:", cabecera)
+
+          if cabecera not in (
+              b"GIF87a",
+              b"GIF89a"
+          ):
+              raise Exception(
+                  "El archivo generado no es un GIF valido"
+              )
+
+          # ==========================================
+          # VERIFICAR CANTIDAD DE FRAMES
+          # ==========================================
+
+          gif = Image.open(salida)
+
+          frames_generados = getattr(
+              gif,
+              "n_frames",
+              1
+          )
+
+          print()
+          print(
+              "Frames del GIF:",
+              frames_generados
+          )
+
+          if frames_generados < 2:
+              raise Exception(
+                  "El GIF no contiene multiples frames"
+              )
+
+          print()
+          print("GIF animado generado correctamente.")
+
           '@ | python
 
-      - name: Verificar tamaño del GIF
+      - name: Verificar GIF
         shell: powershell
         run: |
           $gif = Get-Item "salida\loop_climasur.gif"
 
           $bytes = $gif.Length
-          $mb = [math]::Round($bytes / 1MB, 2)
 
+          $mb = [math]::Round(
+              $bytes / 1MB,
+              2
+          )
+
+          Write-Host ""
           Write-Host "=========================================="
-          Write-Host "GIF generado correctamente"
+          Write-Host "RESULTADO FINAL"
           Write-Host "=========================================="
-          Write-Host "Archivo: $($gif.Name)"
-          Write-Host "Tamaño: $mb MB"
-          Write-Host "=========================================="
+          Write-Host ""
+          Write-Host "Archivo:"
+          Write-Host $gif.Name
+          Write-Host ""
+          Write-Host "Tamanio:"
+          Write-Host "$mb MB"
+          Write-Host ""
 
           if ($bytes -gt 5MB) {
+
               Write-Host "ADVERTENCIA:"
               Write-Host "El GIF supera los 5 MB."
+
           }
           else {
+
+              Write-Host "OK:"
               Write-Host "El GIF esta por debajo de 5 MB."
+
           }
+
+          Write-Host ""
+          Write-Host "=========================================="
 
       - name: Subir GIF como artifact
         uses: actions/upload-artifact@v4
