@@ -1,0 +1,139 @@
+name: Generar loop ClimaSur
+
+on:
+  workflow_dispatch:
+
+jobs:
+  generar-loop:
+
+    runs-on: windows-latest
+
+    steps:
+
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Instalar Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Crear carpeta de trabajo
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force -Path modelos\ARG_INFR
+
+      - name: Descargar ultimas 6 imagenes de ClimaSur
+        shell: powershell
+        run: |
+
+          $pagina = "https://www.climasurgba.com.ar/satelite/goes-topes-nubosos"
+
+          Write-Host "Consultando ClimaSur..."
+
+          $html = (Invoke-WebRequest -Uri $pagina -UseBasicParsing).Content
+
+          $matches = [regex]::Matches(
+              $html,
+              '/satelite/goes-east-13-[0-9]{8}-[0-9]{6}\.png'
+          )
+
+          $urls = @()
+
+          foreach ($m in $matches) {
+              if ($urls -notcontains $m.Value) {
+                  $urls += $m.Value
+              }
+          }
+
+          Write-Host "Imagenes encontradas: $($urls.Count)"
+
+          $urls = @($urls | Select-Object -First 6)
+
+          # ClimaSur devuelve primero la mas reciente.
+          # Invertimos para que el loop vaya hacia adelante.
+          [array]::Reverse($urls)
+
+          Add-Type -AssemblyName System.Drawing
+
+          $contador = 1
+
+          foreach ($url in $urls) {
+
+              $numero = "{0:D2}" -f $contador
+
+              $urlCompleta = "https://www.climasurgba.com.ar$url"
+
+              $png = "goes_$numero.png"
+              $jpg = "modelos\ARG_INFR\goes_$numero.jpg"
+
+              Write-Host "Descargando $urlCompleta"
+
+              Invoke-WebRequest `
+                -Uri $urlCompleta `
+                -OutFile $png
+
+              $imagen = [System.Drawing.Image]::FromFile(
+                  (Resolve-Path $png)
+              )
+
+              $imagen.Save(
+                  "$PWD\$jpg",
+                  [System.Drawing.Imaging.ImageFormat]::Jpeg
+              )
+
+              $imagen.Dispose()
+
+              Remove-Item $png
+
+              $contador++
+          }
+
+      - name: Verificar imagenes
+        shell: cmd
+        run: |
+          dir modelos\ARG_INFR
+
+      - name: Generar animacion
+        shell: cmd
+        working-directory: modelos
+        run: |
+          java -jar loopSatelital.jar /ARG_INFR/
+
+      - name: Buscar GIF generado
+        shell: powershell
+        run: |
+          Write-Host "GIF encontrados:"
+          Get-ChildItem -Path . -Recurse -Filter *.gif
+
+      - name: Preparar GIF para descarga
+        shell: powershell
+        run: |
+
+          New-Item -ItemType Directory -Force -Path salida
+
+          $gif = Get-ChildItem -Path . -Recurse -Filter *.gif |
+                 Sort-Object LastWriteTime -Descending |
+                 Select-Object -First 1
+
+          if (-not $gif) {
+              throw "No se encontro ningun GIF generado por loopSatelital.jar"
+          }
+
+          Write-Host "GIF encontrado:"
+          Write-Host $gif.FullName
+
+          Copy-Item `
+            $gif.FullName `
+            "salida\loop_climasur.gif"
+
+          Write-Host "GIF preparado:"
+          Get-Item "salida\loop_climasur.gif"
+
+      - name: Subir GIF como artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: loop-climasur
+          path: salida/loop_climasur.gif
+          retention-days: 7
