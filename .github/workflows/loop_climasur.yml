@@ -100,7 +100,17 @@ jobs:
       - name: Generar animacion
         shell: cmd
         run: |
-          java -jar loopSatelital.jar /ARG_INFR/
+          echo Directorio:
+          cd
+          echo.
+          echo Archivos:
+          dir
+          echo.
+          echo Buscando JAR:
+          dir /s loopSatelital.jar
+          echo.
+          echo Ejecutando:
+          java -jar "${{ github.workspace }}\loopSatelital.jar" /ARG_INFR/
 
       - name: Buscar GIF generado
         shell: powershell
