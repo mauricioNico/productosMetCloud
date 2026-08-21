@@ -8,7 +8,6 @@ jobs:
     runs-on: windows-latest
 
     steps:
-
       - name: Descargar repositorio
         uses: actions/checkout@v4
 
@@ -18,17 +17,17 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      - name: Crear carpeta ARG_INFR
+      - name: Crear carpeta de trabajo
         shell: powershell
         run: |
-          New-Item -ItemType Directory -Force -Path ARG_INFR
+          $fecha = Get-Date -Format "yyyyMMdd"
+          echo "FECHA=$fecha" >> $env:GITHUB_ENV
+          New-Item -ItemType Directory -Force -Path "$fecha\ARG_INFR"
 
       - name: Descargar ultimas 6 imagenes de ClimaSur
         shell: powershell
         run: |
           $pagina = "https://www.climasurgba.com.ar/satelite/goes-topes-nubosos"
-
-          Write-Host "Consultando ClimaSur..."
 
           $html = (Invoke-WebRequest -Uri $pagina -UseBasicParsing).Content
 
@@ -60,13 +59,11 @@ jobs:
           $contador = 1
 
           foreach ($url in $urls) {
-
               $numero = "{0:D2}" -f $contador
-
               $urlCompleta = "https://www.climasurgba.com.ar$url"
 
               $png = "goes_$numero.png"
-              $jpg = "ARG_INFR\goes_$numero.jpg"
+              $jpg = "$env:FECHA\ARG_INFR\goes_$numero.jpg"
 
               Write-Host "Descargando $urlCompleta"
 
@@ -78,8 +75,10 @@ jobs:
                   (Resolve-Path $png)
               )
 
+              $destino = Join-Path $PWD $jpg
+
               $imagen.Save(
-                  "$PWD\$jpg",
+                  $destino,
                   [System.Drawing.Imaging.ImageFormat]::Jpeg
               )
 
@@ -92,25 +91,19 @@ jobs:
               $contador++
           }
 
-      - name: Verificar imagenes
+      - name: Verificar estructura
         shell: cmd
         run: |
-          dir ARG_INFR
+          echo Fecha: %FECHA%
+          echo.
+          dir "%FECHA%\ARG_INFR"
+          echo.
+          dir loopSatelital.jar
 
       - name: Generar animacion
         shell: cmd
         run: |
-          echo Directorio:
-          cd
-          echo.
-          echo Archivos:
-          dir
-          echo.
-          echo Buscando JAR:
-          dir /s loopSatelital.jar
-          echo.
-          echo Ejecutando:
-          java -jar "${{ github.workspace }}\loopSatelital.jar" /ARG_INFR/
+          java -jar loopSatelital.jar /ARG_INFR/
 
       - name: Buscar GIF generado
         shell: powershell
@@ -131,15 +124,9 @@ jobs:
               throw "No se encontro ningun GIF generado"
           }
 
-          Write-Host "GIF encontrado:"
-          Write-Host $gif.FullName
-
           Copy-Item `
             $gif.FullName `
             "salida\loop_climasur.gif"
-
-          Write-Host "GIF preparado para descarga:"
-          Get-Item "salida\loop_climasur.gif"
 
       - name: Subir GIF como artifact
         uses: actions/upload-artifact@v4
