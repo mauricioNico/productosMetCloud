@@ -9,13 +9,13 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.LocalDate;
-import java.util.Set;
+import java.util.List;
 
 /**
  * Generador automático de soundings GFS.
  *
  * Detecta automáticamente la fecha/ciclo disponible del GFS,
- * descarga los GRIB correspondientes a f012 y f018, y genera un sounding
+ * descarga los GRIB correspondientes a f012, f018, f036 y f042, y genera un sounding
  * para cada localidad configurada usando python/sounding_gfs.py.
  */
 public class GenerarSoundingsAutomaticoGFS {
@@ -25,7 +25,7 @@ public class GenerarSoundingsAutomaticoGFS {
     private static final String PYTHON_CMD = "python";
     private static final String PYTHON_SCRIPT_SOUNDING = "python/sounding_gfs.py";
 
-    private static final Set<Integer> HORAS_SOUNDINGS = Set.of(12, 18);
+    private static final List<Integer> HORAS_SOUNDINGS = List.of(12, 18, 36, 42);
 
     private static final double TOP = -20.0;
     private static final double BOTTOM = -80.0;
@@ -79,9 +79,11 @@ public class GenerarSoundingsAutomaticoGFS {
 
         new File(carpetaGribs).mkdirs();
         new File(carpetaSoundings).mkdirs();
-        // Crear subcarpetas para f012 y f018
-        new File(carpetaSoundings + "/f012").mkdirs();
-        new File(carpetaSoundings + "/f018").mkdirs();
+        // Crear subcarpetas para todos los plazos configurados.
+        for (int horaPron : HORAS_SOUNDINGS) {
+            String horaStr = String.format("%03d", horaPron);
+            new File(carpetaSoundings + "/f" + horaStr).mkdirs();
+        }
 
         System.out.println("\n=== CONFIGURACIÓN AUTOMÁTICA ===");
         System.out.println("Fecha detectada: " + fecha);
@@ -167,10 +169,16 @@ public class GenerarSoundingsAutomaticoGFS {
                                                    double right) {
         int[] ciclos = {18, 12, 6, 0};
 
+        int horaMaximaRequerida = HORAS_SOUNDINGS.stream()
+                .mapToInt(Integer::intValue)
+                .max()
+                .orElse(12);
+
         for (int ciclo : ciclos) {
             try {
-                System.out.println("Probando ciclo " + String.format("%02d", ciclo) + "Z para fecha " + fecha + "...");
-                String url = construirURL(fecha, ciclo, 12, top, bottom, left, right);
+                System.out.println("Probando ciclo " + String.format("%02d", ciclo) + "Z para fecha " + fecha
+                        + " (verificando f" + String.format("%03d", horaMaximaRequerida) + ")...");
+                String url = construirURL(fecha, ciclo, horaMaximaRequerida, top, bottom, left, right);
 
                 if (urlDisponible(url)) {
                     System.out.println("✔ Ciclo disponible detectado: " + String.format("%02d", ciclo) + "Z");
@@ -327,3 +335,4 @@ public class GenerarSoundingsAutomaticoGFS {
         }
     }
 }
+
