@@ -1,15 +1,63 @@
 name: Generar loop ClimaSur con Java
 
 on:
+
+  # ============================================================
+  # EJECUCION AUTOMATICA
+  # ============================================================
+  # Se ejecuta cuando termina el workflow principal.
+  #
+  # IMPORTANTE:
+  # Cambiar "NOMBRE EXACTO DEL WORKFLOW PRINCIPAL"
+  # por el valor de "name:" del otro workflow.
+  # ============================================================
+
+  workflow_run:
+    workflows:
+       - "Generar productos meteorologicos"
+    types:
+      - completed
+
+  # ============================================================
+  # EJECUCION MANUAL
+  # ============================================================
+
   workflow_dispatch:
 
+
 jobs:
+
   generar-loop:
+
+    # ============================================================
+    # EJECUTAR SI:
+    #
+    # 1. Se lanzó manualmente
+    #
+    # O
+    #
+    # 2. El workflow anterior terminó correctamente
+    # ============================================================
+
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+
     runs-on: windows-latest
 
     steps:
+
+      # ==========================================================
+      # DESCARGAR REPOSITORIO
+      # ==========================================================
+
       - name: Descargar repositorio
         uses: actions/checkout@v4
+
+
+      # ==========================================================
+      # JAVA 17
+      # ==========================================================
 
       - name: Instalar Java 17
         uses: actions/setup-java@v4
@@ -17,9 +65,15 @@ jobs:
           distribution: temurin
           java-version: 17
 
+
+      # ==========================================================
+      # CREAR ESTRUCTURA
+      # ==========================================================
+
       - name: Crear estructura C descarga_modelos
         shell: powershell
         run: |
+
           $fecha = Get-Date -Format "yyyyMMdd"
 
           echo "FECHA=$fecha" >> $env:GITHUB_ENV
@@ -37,11 +91,18 @@ jobs:
 
           Write-Host ""
           Write-Host "Estructura creada:"
+
           Get-ChildItem "C:\descarga_modelos"
+
+
+      # ==========================================================
+      # DESCARGAR IMAGENES CLIMASUR
+      # ==========================================================
 
       - name: Descargar ultimas 6 imagenes de ClimaSur
         shell: powershell
         run: |
+
           $pagina = "https://www.climasurgba.com.ar/satelite/goes-topes-nubosos"
 
           Write-Host "=========================================="
@@ -84,14 +145,20 @@ jobs:
 
           }
 
+
+          # ======================================================
           # ClimaSur entrega primero la mas reciente.
-          # Invertimos para animar cronologicamente.
+          # Invertimos para generar la animacion cronologicamente.
+          # ======================================================
 
           [array]::Reverse($urls)
 
+
           Add-Type -AssemblyName System.Drawing
 
+
           $contador = 1
+
 
           foreach ($url in $urls) {
 
@@ -107,33 +174,46 @@ jobs:
             Write-Host "Descargando imagen $contador de 6"
             Write-Host $urlCompleta
 
+
             Invoke-WebRequest `
               -Uri $urlCompleta `
               -OutFile $png
 
+
             $imagen = [System.Drawing.Image]::FromFile(
               $png
             )
+
 
             $imagen.Save(
               $jpg,
               [System.Drawing.Imaging.ImageFormat]::Jpeg
             )
 
+
             $imagen.Dispose()
+
 
             Remove-Item $png
 
+
             Write-Host "Guardada:"
             Write-Host $jpg
+
 
             $contador++
 
           }
 
+
+      # ==========================================================
+      # VERIFICAR ARCHIVOS
+      # ==========================================================
+
       - name: Verificar estructura antes de Java
         shell: powershell
         run: |
+
           Write-Host ""
           Write-Host "=========================================="
           Write-Host "ESTRUCTURA QUE VERA EL JAR"
@@ -141,31 +221,48 @@ jobs:
           Write-Host ""
 
           Write-Host "JAR:"
+
           Get-Item "C:\descarga_modelos\loopSatelital.jar"
+
 
           Write-Host ""
           Write-Host "Carpeta:"
+
           Write-Host "C:\descarga_modelos\$env:FECHA\ARG_INFR"
+
 
           Write-Host ""
           Write-Host "Imagenes:"
 
+
           Get-ChildItem `
             "C:\descarga_modelos\$env:FECHA\ARG_INFR\*.jpg"
+
+
+      # ==========================================================
+      # GENERAR GIF CON JAVA
+      # ==========================================================
 
       - name: Generar animacion con Java
         shell: cmd
         working-directory: C:\descarga_modelos
         run: |
+
           echo ==========================================
           echo GENERANDO GIF CON JAVA
           echo ==========================================
 
           java -jar loopSatelital.jar /ARG_INFR/
 
+
+      # ==========================================================
+      # VERIFICAR GIF
+      # ==========================================================
+
       - name: Verificar GIF generado
         shell: powershell
         run: |
+
           $gif = "C:\descarga_modelos\$env:FECHA\ARG_INFR\loopSatelital.gif"
 
           Write-Host ""
@@ -173,41 +270,59 @@ jobs:
           Write-Host "VERIFICANDO GIF"
           Write-Host "=========================================="
 
+
           if (-not (Test-Path $gif)) {
 
             throw "Java no genero loopSatelital.gif"
 
           }
 
+
           $archivo = Get-Item $gif
+
 
           $mb = [math]::Round(
             $archivo.Length / 1MB,
             2
           )
 
+
           Write-Host ""
           Write-Host "Archivo:"
           Write-Host $archivo.FullName
+
 
           Write-Host ""
           Write-Host "Tamanio:"
           Write-Host "$mb MB"
 
+
           Write-Host ""
           Write-Host "GIF generado correctamente."
+
+
+      # ==========================================================
+      # PREPARAR ARTIFACT
+      # ==========================================================
 
       - name: Preparar GIF para descarga
         shell: powershell
         run: |
+
           New-Item `
             -ItemType Directory `
             -Force `
             -Path "${{ github.workspace }}\salida"
 
+
           Copy-Item `
             "C:\descarga_modelos\$env:FECHA\ARG_INFR\loopSatelital.gif" `
             "${{ github.workspace }}\salida\loopSatelital.gif"
+
+
+      # ==========================================================
+      # SUBIR ARTIFACT
+      # ==========================================================
 
       - name: Subir GIF como artifact
         uses: actions/upload-artifact@v4
