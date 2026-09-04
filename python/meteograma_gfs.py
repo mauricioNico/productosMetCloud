@@ -480,10 +480,14 @@ def fijar_escala_omega(ax, valores):
 
 def fijar_escala_viento_rafagas(ax, viento, rafagas):
     """
-    Escala dinámica para el panel de viento.
-    Reserva una franja inferior exclusivamente para las barbas, de modo
-    que no queden superpuestas con la curva ni con las barras de ráfagas.
-    Devuelve el límite superior utilizado.
+    Escala dinámica para el panel de viento/ráfagas.
+
+    Dos objetivos gráficos:
+      1) El último valor rotulado del eje Y nunca queda pegado al borde
+         superior del panel (evita solaparse con la escala del panel anterior).
+      2) Se reserva una franja inferior amplia para las barbas de viento.
+
+    Devuelve (limite_superior_visual, franja_barbas).
     """
     valores = np.concatenate([
         np.asarray(viento, dtype=float).reshape(-1),
@@ -495,21 +499,29 @@ def fijar_escala_viento_rafagas(ax, viento, rafagas):
 
     if vmax <= 20:
         paso = 5.0
-        lim_superior = max(20.0, np.ceil((vmax * 1.15) / paso) * paso)
     elif vmax <= 50:
         paso = 10.0
-        lim_superior = np.ceil((vmax * 1.15) / paso) * paso
     elif vmax <= 100:
         paso = 20.0
-        lim_superior = np.ceil((vmax * 1.15) / paso) * paso
     else:
         paso = 25.0
-        lim_superior = np.ceil((vmax * 1.15) / paso) * paso
 
-    # Franja inferior reservada para las barbas; no se muestran ticks negativos.
-    franja_barbas = max(5.0, lim_superior * 0.18)
+    # El tick superior se calcula con el máximo real, sin inflarlo 15 %.
+    # El margen se agrega SOLO al límite visual del eje. Así, por ejemplo,
+    # un tick de 50 kt queda claramente separado del borde superior.
+    tick_superior = max(paso, np.ceil(vmax / paso) * paso)
+    if vmax <= 20:
+        tick_superior = max(20.0, tick_superior)
+
+    margen_superior = paso * 0.60
+    lim_superior = tick_superior + margen_superior
+
+    # Franja inferior exclusiva para las barbas. Es deliberadamente más amplia
+    # que antes para que barbas de 30-40 kt no se recorten según su orientación.
+    franja_barbas = max(10.0, paso * 1.5, tick_superior * 0.25)
+
     ax.set_ylim(-franja_barbas, lim_superior)
-    ax.set_yticks(np.arange(0, lim_superior + paso * 0.5, paso))
+    ax.set_yticks(np.arange(0, tick_superior + paso * 0.25, paso))
 
     return lim_superior, franja_barbas
 
@@ -801,8 +813,8 @@ def main():
         figsize=(14, 12),
         sharex=True,
         gridspec_kw={
-            "height_ratios": [4.8, 1.0, 1.35, 1.35, 1.25, 1.0, 1.15],
-            "hspace": 0.05
+            "height_ratios": [4.8, 1.0, 1.35, 1.55, 1.25, 1.0, 1.15],
+            "hspace": 0.08
         }
     )
 
@@ -1039,9 +1051,10 @@ def main():
     ax3.axhline(0, color="#777777", linewidth=0.7, zorder=2)
 
     # Barbas en una franja exclusiva por debajo de 0 kt.
-    # Su posición vertical es sólo gráfica; la magnitud sigue estando
-    # codificada por la propia barba.
-    ybarb = np.full(len(df), -franja_barbas * 0.50)
+    # La posición Y es sólo gráfica; la magnitud está codificada por la barba.
+    # pivot="middle" centra la barba sobre su punto y evita que una dirección
+    # particular (por ejemplo viento sur intenso) quede recortada contra el borde.
+    ybarb = np.full(len(df), -franja_barbas * 0.48)
 
     paso_barbas10 = max(1, len(df) // 32)
 
@@ -1050,10 +1063,12 @@ def main():
         ybarb[::paso_barbas10],
         (df["u10"].values * 1.94384)[::paso_barbas10],
         (df["v10"].values * 1.94384)[::paso_barbas10],
-        length=4.5,
-        linewidth=0.50,
+        length=5.4,
+        linewidth=0.60,
         color="#5f4a3a",
-        zorder=5,
+        pivot="middle",
+        barb_increments={"half": 5, "full": 10, "flag": 50},
+        zorder=6,
         clip_on=True
     )
 
