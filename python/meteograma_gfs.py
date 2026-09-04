@@ -282,6 +282,48 @@ def normalizar_precip_mm_desde_da(da):
     return val
 
 
+def normalizar_velocidad_kt_desde_da(da):
+    """
+    Devuelve una velocidad escalar en nudos.
+    GFS normalmente entrega las ráfagas en m/s, pero se inspeccionan
+    las unidades para evitar una conversión doble si el GRIB ya viniera en kt.
+    """
+    if da is None:
+        return np.nan
+
+    try:
+        val = float(np.asarray(da.values).squeeze())
+    except Exception:
+        return np.nan
+
+    if not np.isfinite(val):
+        return np.nan
+
+    unidades = str(da.attrs.get("units", "")).lower().strip()
+
+    if (
+        "kt" in unidades
+        or "knot" in unidades
+        or "knots" in unidades
+    ):
+        return val
+
+    # GFS/GRIB2 suele expresar velocidad en m s**-1.
+    if (
+        "m/s" in unidades
+        or "m s-1" in unidades
+        or "m s**-1" in unidades
+        or "m s^-1" in unidades
+        or "m s⁻¹" in unidades
+        or unidades == "ms-1"
+    ):
+        return val * 1.94384
+
+    # Fallback deliberado para GFS: si la unidad no está disponible,
+    # asumimos m/s, que es lo habitual en el campo GUST.
+    return val * 1.94384
+
+
 def leer_tiempo_archivo(archivo):
     candidatos = [
         abrir_por_shortname(archivo, "prmsl"),
@@ -289,6 +331,11 @@ def leer_tiempo_archivo(archivo):
         abrir_por_shortname(archivo, "2t"),
         abrir_por_shortname(archivo, "2r"),
         abrir_por_shortname(archivo, "10u"),
+        abrir_con_filtros_posibles(archivo, [
+            {"shortName": "gust", "typeOfLevel": "surface"},
+            {"shortName": "gust", "typeOfLevel": "heightAboveGround"},
+            {"shortName": "gust"},
+        ]),
         abrir_por_shortname(archivo, "t", {"typeOfLevel": "isobaricInhPa"}),
     ]
 
@@ -431,6 +478,42 @@ def fijar_escala_omega(ax, valores):
     ax.set_yticks(ticks)
 
 
+def fijar_escala_viento_rafagas(ax, viento, rafagas):
+    """
+    Escala dinámica para el panel de viento.
+    Reserva una franja inferior exclusivamente para las barbas, de modo
+    que no queden superpuestas con la curva ni con las barras de ráfagas.
+    Devuelve el límite superior utilizado.
+    """
+    valores = np.concatenate([
+        np.asarray(viento, dtype=float).reshape(-1),
+        np.asarray(rafagas, dtype=float).reshape(-1),
+    ])
+    valores = valores[np.isfinite(valores)]
+
+    vmax = float(np.nanmax(valores)) if len(valores) else 0.0
+
+    if vmax <= 20:
+        paso = 5.0
+        lim_superior = max(20.0, np.ceil((vmax * 1.15) / paso) * paso)
+    elif vmax <= 50:
+        paso = 10.0
+        lim_superior = np.ceil((vmax * 1.15) / paso) * paso
+    elif vmax <= 100:
+        paso = 20.0
+        lim_superior = np.ceil((vmax * 1.15) / paso) * paso
+    else:
+        paso = 25.0
+        lim_superior = np.ceil((vmax * 1.15) / paso) * paso
+
+    # Franja inferior reservada para las barbas; no se muestran ticks negativos.
+    franja_barbas = max(5.0, lim_superior * 0.18)
+    ax.set_ylim(-franja_barbas, lim_superior)
+    ax.set_yticks(np.arange(0, lim_superior + paso * 0.5, paso))
+
+    return lim_superior, franja_barbas
+
+
 def color_cape(valor):
     if not np.isfinite(valor):
         return "#cccccc"
@@ -489,6 +572,7 @@ def main():
     rh2m_list = []
     u10_list = []
     v10_list = []
+    gust10_kt_list = []
     tp_acum_list = []
 
     perfiles_t = []
@@ -512,6 +596,14 @@ def main():
 
         ds_10u = abrir_por_shortname(archivo, "10u")
         ds_10v = abrir_por_shortname(archivo, "10v")
+
+        # Ráfaga máxima de superficie. El shortName habitual en GFS es "gust".
+        # Se prueban filtros alternativos para tolerar diferencias entre GRIBs.
+        ds_gust = abrir_con_filtros_posibles(archivo, [
+            {"shortName": "gust", "typeOfLevel": "surface"},
+            {"shortName": "gust", "typeOfLevel": "heightAboveGround"},
+            {"shortName": "gust"}
+        ])
 
         ds_tp = abrir_por_shortname(archivo, "tp")
         if ds_tp is None:
@@ -595,6 +687,9 @@ def main():
         u10 = extraer_escalar_desde_ds(ds_10u, lat, lon)
         v10 = extraer_escalar_desde_ds(ds_10v, lat, lon)
 
+        da_gust = extraer_dataarray_punto(ds_gust, lat, lon)
+        gust10_kt = normalizar_velocidad_kt_desde_da(da_gust)
+
         da_tp = extraer_dataarray_punto(ds_tp, lat, lon)
         tp = normalizar_precip_mm_desde_da(da_tp)
 
@@ -621,6 +716,7 @@ def main():
             f"LI={lifted:.1f} | Omega700={omega700:.3f} | "
             f"T2m={t2m:.1f} | RH2m={rh2m:.1f} | "
             f"U10={u10:.1f} V10={v10:.1f} | "
+            f"GUST={gust10_kt:.1f} kt | "
             f"TPacum={tp:.3f} mm | unidades={unidades_tp}"
         )
 
@@ -636,6 +732,7 @@ def main():
         rh2m_list.append(rh2m)
         u10_list.append(u10)
         v10_list.append(v10)
+        gust10_kt_list.append(gust10_kt)
         tp_acum_list.append(tp)
 
         perfiles_t.append(perfil_t)
@@ -658,6 +755,7 @@ def main():
         "rh2m": rh2m_list,
         "u10": u10_list,
         "v10": v10_list,
+        "gust10_kt": gust10_kt_list,
         "tp_acum": tp_acum_list
     })
 
@@ -681,6 +779,13 @@ def main():
     df["wind10_kt"] = np.sqrt(df["u10"] ** 2 + df["v10"] ** 2) * 1.94384
     df["tp_intervalo"] = calcular_precipitacion_intervalo(df["tp_acum"].values)
 
+    if not np.isfinite(df["gust10_kt"]).any():
+        print(
+            "⚠ No se encontró el campo GUST en los GRIB2. "
+            "El panel se generará sin barras de ráfagas. "
+            "Verificar que la descarga GFS incluya var_GUST=on."
+        )
+
     x = df["tiempo"]
 
     if len(df) >= 2:
@@ -693,11 +798,11 @@ def main():
     fig, axes = plt.subplots(
         7,
         1,
-        figsize=(14, 11),
+        figsize=(14, 12),
         sharex=True,
         gridspec_kw={
-            "height_ratios": [4.8, 1.0, 1.35, 1.0, 1.25, 1.0, 1.15],
-            "hspace": 0.04
+            "height_ratios": [4.8, 1.0, 1.35, 1.35, 1.25, 1.0, 1.15],
+            "hspace": 0.05
         }
     )
 
@@ -894,33 +999,73 @@ def main():
     ax2b.tick_params(axis="y", labelsize=8)
 
     # -------------------------
-    # 4) Viento 10 m
+    # 4) Viento 10 m + ráfagas
     # -------------------------
     ax3 = axes[3]
 
+    # Las ráfagas se dibujan primero como barras para que queden de fondo.
+    # No se agregan etiquetas numéricas sobre cada barra: en series de 3 h
+    # terminarían solapándose y dificultarían la lectura.
+    ax3.bar(
+        x,
+        df["gust10_kt"],
+        width=ancho_barra * 0.78,
+        color="#f2b66d",
+        alpha=0.55,
+        edgecolor="#c97820",
+        linewidth=0.45,
+        label="Ráfaga",
+        zorder=1
+    )
+
+    # Viento sostenido a 10 m.
     ax3.plot(
         x,
         df["wind10_kt"],
         color="#ff7f00",
-        linewidth=1.5
+        linewidth=1.7,
+        label="Viento 10 m",
+        zorder=4
     )
 
-    ax3.set_ylabel("Viento\n10m kt")
-    ax3.grid(True, linestyle="--", alpha=0.45)
-
-    ybarb = np.full(
-        len(df),
-        np.nanmean(df["wind10_kt"]) if np.isfinite(df["wind10_kt"]).any() else 0
+    lim_viento, franja_barbas = fijar_escala_viento_rafagas(
+        ax3,
+        df["wind10_kt"].values,
+        df["gust10_kt"].values
     )
+
+    ax3.set_ylabel("Viento / ráfaga\n10 m (kt)")
+    ax3.grid(True, linestyle="--", alpha=0.40, zorder=0)
+    ax3.axhline(0, color="#777777", linewidth=0.7, zorder=2)
+
+    # Barbas en una franja exclusiva por debajo de 0 kt.
+    # Su posición vertical es sólo gráfica; la magnitud sigue estando
+    # codificada por la propia barba.
+    ybarb = np.full(len(df), -franja_barbas * 0.50)
+
+    paso_barbas10 = max(1, len(df) // 32)
 
     ax3.barbs(
-        mdates.date2num(x),
-        ybarb,
-        df["u10"].values * 1.94384,
-        df["v10"].values * 1.94384,
-        length=5,
-        linewidth=0.55,
-        color="#8b5a2b"
+        mdates.date2num(x)[::paso_barbas10],
+        ybarb[::paso_barbas10],
+        (df["u10"].values * 1.94384)[::paso_barbas10],
+        (df["v10"].values * 1.94384)[::paso_barbas10],
+        length=4.5,
+        linewidth=0.50,
+        color="#5f4a3a",
+        zorder=5,
+        clip_on=True
+    )
+
+    # Una sola leyenda compacta, fuera de la zona más cargada del panel.
+    ax3.legend(
+        loc="upper right",
+        fontsize=7,
+        framealpha=0.85,
+        ncol=2,
+        borderpad=0.35,
+        handlelength=1.6,
+        columnspacing=0.9
     )
 
     # -------------------------
