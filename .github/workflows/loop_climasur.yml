@@ -14,7 +14,7 @@ on:
 
   workflow_run:
     workflows:
-       - "Generar productos meteorologicos"
+       - "Generar productos GFS"
     types:
       - completed
 
