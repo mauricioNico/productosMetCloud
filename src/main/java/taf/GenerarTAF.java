@@ -2,11 +2,19 @@ package taf;
 
 import java.io.BufferedReader;
 import java.io.IOException;
+import javax.imageio.ImageIO;
+import java.awt.Color;
+import java.awt.Font;
+import java.awt.FontMetrics;
+import java.awt.Graphics2D;
+import java.awt.RenderingHints;
+import java.awt.image.BufferedImage;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
@@ -18,32 +26,27 @@ import java.util.Locale;
 import java.util.Map;
 
 /**
- * Generador de TAF corto orientativo a partir de datos horarios de GFS.
+ * Generador de pronósticos automáticos orientativos a partir de datos GFS.
  *
  * Compatible con Java 17 y sin dependencias externas.
  *
+ * Lee el CSV generado por meteograma_gfs.py, calcula el pronóstico corto
+ * de cada localidad y crea UN ÚNICO PNG con todos los pronósticos.
+ * No genera archivos TXT individuales.
+ *
  * USO:
- *   javac GenerarTAF.java
- *   java GenerarTAF datos_taf.csv
+ *   java taf.GenerarTAF datos_taf.csv carpeta_salida
  *
- * o:
- *   java GenerarTAF datos_taf.csv C:\modelos\salidas\20260909\taf12
- *
- * El CSV puede estar separado por coma o punto y coma.
+ * Opcionalmente se puede indicar la ruta del escudo:
+ *   java taf.GenerarTAF datos_taf.csv carpeta_salida imagenes/escudo_dmm.png
  *
  * Columnas esperadas:
- *
  * nombre,fecha_hora,wind_dir,wind_kt,gust_kt,vis_m,temp_c,td_c,rh,
  * precip_mm,conv_precip_mm,cape,cin,reflectivity_dbz,low_cloud_pct,
  * ceiling_ft_agl
  *
- * Ejemplo de fecha_hora:
- *   2026-09-09T12:00
- *   2026-09-09 12:00
- *
  * IMPORTANTE:
- * Este programa genera un TAF AUTOMATICO/ORIENTATIVO. No reemplaza
- * la revisión y responsabilidad de un pronosticador aeronáutico.
+ * El producto es automático/orientativo y requiere revisión profesional.
  */
 public class GenerarTAF {
 
@@ -52,6 +55,21 @@ public class GenerarTAF {
     // ============================================================
 
     private static final int HORAS_VALIDEZ = 12;
+
+    // Producto PNG único
+    private static final int PNG_ANCHO = 1800;
+    private static final int PNG_MARGEN = 60;
+    private static final int PNG_COLUMNAS = 2;
+    private static final int PNG_SEPARACION_COLUMNAS = 30;
+    private static final int PNG_SEPARACION_FILAS = 24;
+
+    private static final String RUTA_ESCUDO_PREDETERMINADA = "imagenes/escudo_dmm.png";
+
+    private static final String AVISO_ORIENTATIVO =
+            "Estos pronósticos constituyen una salida automática a partir de los meteogramas " +
+            "pronosticados y deben solo considerarse de carácter orientativo. Consulte los " +
+            "pronósticos por cada unidad de la FAA en " +
+            "https://imagenesmeteorologicas.faa.mil.ar/app/model/verinfo.php";
 
     // Viento
     private static final double RAFAGA_DIFERENCIA_MIN_KT = 10.0;
@@ -94,6 +112,9 @@ public class GenerarTAF {
 
     public static void main(String[] args) {
 
+        // Necesario para GitHub Actions / servidores Linux sin entorno gráfico.
+        System.setProperty("java.awt.headless", "true");
+
         Locale.setDefault(Locale.US);
 
         if (args.length < 1) {
@@ -103,12 +124,13 @@ public class GenerarTAF {
 
         Path archivoEntrada = Paths.get(args[0]);
 
-        Path carpetaSalida;
-        if (args.length >= 2) {
-            carpetaSalida = Paths.get(args[1]);
-        } else {
-            carpetaSalida = Paths.get("taf_salida");
-        }
+        Path carpetaSalida = args.length >= 2
+                ? Paths.get(args[1])
+                : Paths.get("taf_salida");
+
+        Path rutaEscudo = args.length >= 3
+                ? Paths.get(args[2])
+                : Paths.get(RUTA_ESCUDO_PREDETERMINADA);
 
         try {
             if (!Files.exists(archivoEntrada)) {
@@ -117,6 +139,7 @@ public class GenerarTAF {
             }
 
             Files.createDirectories(carpetaSalida);
+            limpiarSalidasAnteriores(carpetaSalida);
 
             List<RegistroHorario> registros = leerCSV(archivoEntrada);
 
@@ -126,9 +149,12 @@ public class GenerarTAF {
             }
 
             Map<String, List<RegistroHorario>> porLocalidad = agruparPorLocalidad(registros);
+            Map<String, String> pronosticos = new LinkedHashMap<>();
+
+            LocalDateTime inicioGeneral = null;
 
             System.out.println("====================================================");
-            System.out.println(" GENERADOR AUTOMATICO DE TAF CORTO");
+            System.out.println(" GENERADOR DE PRONOSTICOS AUTOMATICOS - PNG UNICO");
             System.out.println("====================================================");
             System.out.println("Archivo: " + archivoEntrada.toAbsolutePath());
             System.out.println("Localidades encontradas: " + porLocalidad.size());
@@ -140,24 +166,54 @@ public class GenerarTAF {
                 List<RegistroHorario> datos = entry.getValue();
 
                 try {
-                    String taf = generarTAF(nombre, datos);
+                    datos.sort(Comparator.comparing(r -> r.fechaHora));
 
-                    Path archivoSalida = carpetaSalida.resolve("TAF_" + nombreSeguroArchivo(nombre) + ".txt");
+                    if (!datos.isEmpty()) {
+                        LocalDateTime inicioLocal = datos.get(0).fechaHora;
+                        if (inicioGeneral == null || inicioLocal.isBefore(inicioGeneral)) {
+                            inicioGeneral = inicioLocal;
+                        }
+                    }
 
-                    Files.writeString(
-                            archivoSalida,
-                            taf,
-                            StandardCharsets.UTF_8
-                    );
+                    String taf = generarTAF(datos);
+                    pronosticos.put(nombre, taf);
 
-                    System.out.println("OK  " + nombre + " -> " + archivoSalida.toAbsolutePath());
+                    System.out.println("OK  " + nombre);
 
                 } catch (Exception e) {
-                    System.err.println("ERROR generando TAF para " + nombre + ": " + e.getMessage());
+                    System.err.println("ERROR generando pronostico para " + nombre + ": " + e.getMessage());
                 }
             }
 
+            if (pronosticos.isEmpty() || inicioGeneral == null) {
+                System.err.println("ERROR: No se pudo generar ningún pronóstico.");
+                return;
+            }
+
+            LocalDateTime finGeneral = inicioGeneral.plusHours(HORAS_VALIDEZ);
+            LocalDateTime emisionGeneral = LocalDateTime.now(ZoneOffset.UTC);
+
+            String nombrePng = String.format(
+                    "pronosticos_automaticos_%04d%02d%02d_%02dZ.png",
+                    inicioGeneral.getYear(),
+                    inicioGeneral.getMonthValue(),
+                    inicioGeneral.getDayOfMonth(),
+                    inicioGeneral.getHour()
+            );
+
+            Path salidaPng = carpetaSalida.resolve(nombrePng);
+
+            generarProductoPNG(
+                    pronosticos,
+                    salidaPng,
+                    rutaEscudo,
+                    emisionGeneral,
+                    inicioGeneral,
+                    finGeneral
+            );
+
             System.out.println();
+            System.out.println("PNG generado: " + salidaPng.toAbsolutePath());
             System.out.println("Proceso finalizado.");
 
         } catch (Exception e) {
@@ -167,28 +223,57 @@ public class GenerarTAF {
     }
 
     /**
-     * Permite ejecutar el generador desde DescargaGFSMenu sin abrir otro proceso Java.
+     * Mantiene la interfaz usada por DescargaGFSMenu.
+     * No hace falta modificar la llamada existente.
      */
     public static void generar(String archivoCsv, String carpetaSalida) {
         main(new String[]{archivoCsv, carpetaSalida});
     }
 
+    /**
+     * Variante opcional para indicar otra imagen de escudo.
+     */
+    public static void generar(String archivoCsv, String carpetaSalida, String rutaEscudo) {
+        main(new String[]{archivoCsv, carpetaSalida, rutaEscudo});
+    }
+
     private static void mostrarAyuda() {
         System.out.println("""
                 Uso:
-                  java GenerarTAF datos_taf.csv
-                  java GenerarTAF datos_taf.csv carpeta_salida
+                  java taf.GenerarTAF datos_taf.csv carpeta_salida
 
-                Ejemplo:
-                  java GenerarTAF C:\\modelos\\datos_taf_12.csv C:\\modelos\\salidas\\20260909\\taf12
+                Opcional:
+                  java taf.GenerarTAF datos_taf.csv carpeta_salida imagenes/escudo_dmm.png
+
+                El resultado es un único PNG con todos los pronósticos.
                 """);
     }
 
+    private static void limpiarSalidasAnteriores(Path carpetaSalida) {
+        try (java.util.stream.Stream<Path> stream = Files.list(carpetaSalida)) {
+            for (Path p : stream.toList()) {
+                String nombre = p.getFileName().toString();
+                boolean txtAnterior = nombre.startsWith("TAF_") && nombre.endsWith(".txt");
+                boolean pngAnterior = nombre.startsWith("pronosticos_automaticos_") && nombre.endsWith(".png");
+
+                if (txtAnterior || pngAnterior) {
+                    try {
+                        Files.deleteIfExists(p);
+                    } catch (IOException e) {
+                        System.out.println("ADVERTENCIA: no se pudo borrar salida anterior: " + p);
+                    }
+                }
+            }
+        } catch (IOException e) {
+            System.out.println("ADVERTENCIA: no se pudo revisar la carpeta de salida: " + e.getMessage());
+        }
+    }
+
     // ============================================================
-    // GENERACION DEL TAF
+    // GENERACION DEL PRONOSTICO POR LOCALIDAD
     // ============================================================
 
-    private static String generarTAF(String nombre, List<RegistroHorario> datos) {
+    private static String generarTAF(List<RegistroHorario> datos) {
 
         datos.sort(Comparator.comparing(r -> r.fechaHora));
 
@@ -205,24 +290,14 @@ public class GenerarTAF {
 
         if (periodo.size() < 2) {
             throw new IllegalArgumentException(
-                    "Se necesitan al menos 2 horas de datos dentro del periodo de validez."
+                    "Se necesitan al menos 2 tiempos de datos dentro del período de validez."
             );
         }
 
-        LocalDateTime emision = inicio.minusHours(1);
-
-        String encabezado =
-                nombre.replace('_', ' ') + "\n"
-                        + "Emision: " + formatearEmisionTexto(emision) + "\n"
-                        + "Validez: " + formatearValidezTexto(inicio, fin);
-
         RegistroHorario inicial = periodo.get(0);
-
         List<GrupoCambio> grupos = detectarCambios(periodo);
 
         StringBuilder sb = new StringBuilder();
-
-        sb.append(encabezado).append("\n\n");
         sb.append(formatearEstado(inicial));
 
         for (GrupoCambio grupo : grupos) {
@@ -251,8 +326,6 @@ public class GenerarTAF {
                 }
             }
         }
-
-        sb.append("\n");
 
         return sb.toString();
     }
@@ -891,6 +964,384 @@ public class GenerarTAF {
     }
 
     // ============================================================
+    // PRODUCTO PNG UNICO
+    // ============================================================
+
+    private static void generarProductoPNG(
+            Map<String, String> pronosticos,
+            Path salidaPng,
+            Path rutaEscudo,
+            LocalDateTime emisionGeneral,
+            LocalDateTime inicioValidez,
+            LocalDateTime finValidez) throws IOException {
+
+        Font fuenteTitulo = new Font("SansSerif", Font.BOLD, 44);
+        Font fuenteSubtitulo = new Font("SansSerif", Font.BOLD, 28);
+        Font fuenteMeta = new Font("SansSerif", Font.PLAIN, 22);
+        Font fuenteAviso = new Font("SansSerif", Font.BOLD, 21);
+        Font fuenteLugar = new Font("SansSerif", Font.BOLD, 25);
+        Font fuenteTAF = new Font("Monospaced", Font.PLAIN, 20);
+        Font fuentePie = new Font("SansSerif", Font.PLAIN, 16);
+
+        BufferedImage auxiliar = new BufferedImage(10, 10, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D ga = auxiliar.createGraphics();
+        configurarRenderizado(ga);
+
+        int anchoUtil = PNG_ANCHO - 2 * PNG_MARGEN;
+        int anchoColumna = (anchoUtil - PNG_SEPARACION_COLUMNAS) / PNG_COLUMNAS;
+        int anchoTextoTarjeta = anchoColumna - 44;
+
+        FontMetrics fmTaf = ga.getFontMetrics(fuenteTAF);
+        FontMetrics fmLugar = ga.getFontMetrics(fuenteLugar);
+        FontMetrics fmAviso = ga.getFontMetrics(fuenteAviso);
+
+        List<TarjetaPronostico> tarjetas = new ArrayList<>();
+
+        for (Map.Entry<String, String> entry : pronosticos.entrySet()) {
+            List<String> lineas = envolverTAF(entry.getValue(), fmTaf, anchoTextoTarjeta);
+
+            int altoTarjeta = 28
+                    + fmLugar.getHeight()
+                    + 14
+                    + lineas.size() * (fmTaf.getHeight() + 3)
+                    + 26;
+
+            tarjetas.add(new TarjetaPronostico(entry.getKey(), lineas, altoTarjeta));
+        }
+
+        List<String> lineasAviso = envolverTexto(AVISO_ORIENTATIVO, fmAviso, anchoUtil - 60);
+        int altoAviso = 34 + lineasAviso.size() * (fmAviso.getHeight() + 3) + 30;
+
+        int altoCabecera = 245;
+        int altoContenido = calcularAltoContenido(tarjetas);
+        int altoPie = 70;
+
+        int altoTotal = PNG_MARGEN
+                + altoCabecera
+                + altoAviso
+                + 28
+                + altoContenido
+                + altoPie
+                + PNG_MARGEN;
+
+        ga.dispose();
+
+        BufferedImage imagen = new BufferedImage(PNG_ANCHO, altoTotal, BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = imagen.createGraphics();
+        configurarRenderizado(g);
+
+        Color azul = new Color(17, 91, 132);
+        Color celeste = new Color(226, 243, 250);
+        Color fondoTarjeta = new Color(247, 249, 251);
+        Color borde = new Color(184, 194, 202);
+        Color textoSecundario = new Color(70, 70, 70);
+
+        g.setColor(Color.WHITE);
+        g.fillRect(0, 0, PNG_ANCHO, altoTotal);
+
+        // -------------------------
+        // CABECERA
+        // -------------------------
+        BufferedImage logo = cargarYRecortarLogo(rutaEscudo);
+
+        int logoX = PNG_MARGEN;
+        int logoY = PNG_MARGEN - 10;
+        int logoMaxW = 205;
+        int logoMaxH = 190;
+
+        if (logo != null) {
+            dibujarImagenAjustada(g, logo, logoX, logoY, logoMaxW, logoMaxH);
+        } else {
+            g.setColor(celeste);
+            g.fillRoundRect(logoX, logoY, logoMaxW, logoMaxH, 20, 20);
+            g.setColor(azul);
+            g.setFont(new Font("SansSerif", Font.BOLD, 22));
+            g.drawString("FAA - DGSAM", logoX + 25, logoY + 95);
+        }
+
+        int xTitulo = PNG_MARGEN + 245;
+        int yTitulo = PNG_MARGEN + 45;
+
+        g.setColor(azul);
+        g.setFont(fuenteTitulo);
+        g.drawString("PRONÓSTICOS AUTOMÁTICOS ORIENTATIVOS", xTitulo, yTitulo);
+
+        g.setColor(Color.BLACK);
+        g.setFont(fuenteSubtitulo);
+        g.drawString("Departamento Meteorología Militar - FAA / DGSAM", xTitulo, yTitulo + 47);
+
+        DateTimeFormatter fmtEmision = DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm 'UTC'");
+        DateTimeFormatter fmtValidez = DateTimeFormatter.ofPattern("dd/MM/yyyy HH'Z'");
+
+        g.setFont(fuenteMeta);
+        g.setColor(textoSecundario);
+        g.drawString(
+                "Emisión general: " + emisionGeneral.format(fmtEmision),
+                xTitulo,
+                yTitulo + 93
+        );
+        g.drawString(
+                "Validez orientativa: " + inicioValidez.format(fmtValidez)
+                        + " a " + finValidez.format(fmtValidez),
+                xTitulo,
+                yTitulo + 127
+        );
+
+        int yAviso = PNG_MARGEN + altoCabecera;
+
+        // -------------------------
+        // AVISO DESTACADO
+        // -------------------------
+        g.setColor(celeste);
+        g.fillRoundRect(PNG_MARGEN, yAviso, anchoUtil, altoAviso, 24, 24);
+        g.setColor(azul);
+        g.drawRoundRect(PNG_MARGEN, yAviso, anchoUtil, altoAviso, 24, 24);
+
+        g.setFont(fuenteAviso);
+        g.setColor(new Color(25, 55, 70));
+
+        int yTextoAviso = yAviso + 38;
+        for (String linea : lineasAviso) {
+            g.drawString(linea, PNG_MARGEN + 30, yTextoAviso);
+            yTextoAviso += fmAviso.getHeight() + 3;
+        }
+
+        // -------------------------
+        // TARJETAS DE PRONOSTICOS
+        // -------------------------
+        int yContenido = yAviso + altoAviso + 28;
+
+        for (int fila = 0; fila * PNG_COLUMNAS < tarjetas.size(); fila++) {
+
+            int base = fila * PNG_COLUMNAS;
+            int altoFila = 0;
+
+            for (int c = 0; c < PNG_COLUMNAS; c++) {
+                int idx = base + c;
+                if (idx < tarjetas.size()) {
+                    altoFila = Math.max(altoFila, tarjetas.get(idx).alto);
+                }
+            }
+
+            for (int c = 0; c < PNG_COLUMNAS; c++) {
+                int idx = base + c;
+                if (idx >= tarjetas.size()) {
+                    continue;
+                }
+
+                TarjetaPronostico tarjeta = tarjetas.get(idx);
+
+                int x = PNG_MARGEN + c * (anchoColumna + PNG_SEPARACION_COLUMNAS);
+                int y = yContenido;
+
+                g.setColor(fondoTarjeta);
+                g.fillRoundRect(x, y, anchoColumna, altoFila, 20, 20);
+                g.setColor(borde);
+                g.drawRoundRect(x, y, anchoColumna, altoFila, 20, 20);
+
+                g.setFont(fuenteLugar);
+                g.setColor(azul);
+                g.drawString(
+                        tarjeta.nombre.replace('_', ' '),
+                        x + 22,
+                        y + 34
+                );
+
+                g.setColor(new Color(205, 214, 220));
+                g.drawLine(x + 22, y + 49, x + anchoColumna - 22, y + 49);
+
+                g.setFont(fuenteTAF);
+                g.setColor(Color.BLACK);
+
+                int yTaf = y + 78;
+                for (String linea : tarjeta.lineas) {
+                    g.drawString(linea, x + 22, yTaf);
+                    yTaf += fmTaf.getHeight() + 3;
+                }
+            }
+
+            yContenido += altoFila + PNG_SEPARACION_FILAS;
+        }
+
+        // -------------------------
+        // PIE
+        // -------------------------
+        int yPie = altoTotal - PNG_MARGEN - 25;
+        g.setColor(new Color(150, 150, 150));
+        g.drawLine(PNG_MARGEN, yPie - 30, PNG_ANCHO - PNG_MARGEN, yPie - 30);
+
+        g.setFont(fuentePie);
+        g.setColor(textoSecundario);
+        g.drawString(
+                "Producto automático generado a partir de la salida GFS 0.25°.",
+                PNG_MARGEN,
+                yPie
+        );
+
+        g.dispose();
+
+        Files.createDirectories(salidaPng.getParent());
+        ImageIO.write(imagen, "png", salidaPng.toFile());
+    }
+
+    private static void configurarRenderizado(Graphics2D g) {
+        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+        g.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
+        g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
+    }
+
+    private static BufferedImage cargarYRecortarLogo(Path rutaEscudo) {
+        try {
+            if (rutaEscudo == null || !Files.exists(rutaEscudo)) {
+                System.out.println("ADVERTENCIA: no se encontró el escudo: "
+                        + (rutaEscudo == null ? "null" : rutaEscudo.toAbsolutePath()));
+                return null;
+            }
+
+            BufferedImage original = ImageIO.read(rutaEscudo.toFile());
+            if (original == null) {
+                return null;
+            }
+
+            return recortarTransparencia(original);
+
+        } catch (Exception e) {
+            System.out.println("ADVERTENCIA: no se pudo cargar el escudo: " + e.getMessage());
+            return null;
+        }
+    }
+
+    private static BufferedImage recortarTransparencia(BufferedImage imagen) {
+
+        if (!imagen.getColorModel().hasAlpha()) {
+            return imagen;
+        }
+
+        int minX = imagen.getWidth();
+        int minY = imagen.getHeight();
+        int maxX = -1;
+        int maxY = -1;
+
+        for (int y = 0; y < imagen.getHeight(); y++) {
+            for (int x = 0; x < imagen.getWidth(); x++) {
+                int alpha = (imagen.getRGB(x, y) >>> 24) & 0xFF;
+                if (alpha > 10) {
+                    minX = Math.min(minX, x);
+                    minY = Math.min(minY, y);
+                    maxX = Math.max(maxX, x);
+                    maxY = Math.max(maxY, y);
+                }
+            }
+        }
+
+        if (maxX < minX || maxY < minY) {
+            return imagen;
+        }
+
+        return imagen.getSubimage(
+                minX,
+                minY,
+                maxX - minX + 1,
+                maxY - minY + 1
+        );
+    }
+
+    private static void dibujarImagenAjustada(
+            Graphics2D g,
+            BufferedImage imagen,
+            int x,
+            int y,
+            int maxW,
+            int maxH) {
+
+        double escala = Math.min(
+                maxW / (double) imagen.getWidth(),
+                maxH / (double) imagen.getHeight()
+        );
+
+        int w = (int) Math.round(imagen.getWidth() * escala);
+        int h = (int) Math.round(imagen.getHeight() * escala);
+
+        int xx = x + (maxW - w) / 2;
+        int yy = y + (maxH - h) / 2;
+
+        g.drawImage(imagen, xx, yy, w, h, null);
+    }
+
+    private static List<String> envolverTAF(String taf, FontMetrics fm, int anchoMax) {
+
+        List<String> salida = new ArrayList<>();
+
+        for (String linea : taf.replace("\r", "").split("\n")) {
+            String limpia = linea.trim();
+            if (limpia.isEmpty()) {
+                continue;
+            }
+            salida.addAll(envolverTexto(limpia, fm, anchoMax));
+        }
+
+        return salida;
+    }
+
+    private static List<String> envolverTexto(String texto, FontMetrics fm, int anchoMax) {
+
+        List<String> lineas = new ArrayList<>();
+        String[] palabras = texto.trim().split("\\s+");
+        StringBuilder actual = new StringBuilder();
+
+        for (String palabra : palabras) {
+
+            String candidato = actual.length() == 0
+                    ? palabra
+                    : actual + " " + palabra;
+
+            if (fm.stringWidth(candidato) <= anchoMax) {
+                actual.setLength(0);
+                actual.append(candidato);
+            } else {
+                if (actual.length() > 0) {
+                    lineas.add(actual.toString());
+                }
+                actual.setLength(0);
+                actual.append(palabra);
+            }
+        }
+
+        if (actual.length() > 0) {
+            lineas.add(actual.toString());
+        }
+
+        return lineas;
+    }
+
+    private static int calcularAltoContenido(List<TarjetaPronostico> tarjetas) {
+
+        int total = 0;
+
+        for (int fila = 0; fila * PNG_COLUMNAS < tarjetas.size(); fila++) {
+
+            int base = fila * PNG_COLUMNAS;
+            int altoFila = 0;
+
+            for (int c = 0; c < PNG_COLUMNAS; c++) {
+                int idx = base + c;
+                if (idx < tarjetas.size()) {
+                    altoFila = Math.max(altoFila, tarjetas.get(idx).alto);
+                }
+            }
+
+            total += altoFila;
+
+            if ((fila + 1) * PNG_COLUMNAS < tarjetas.size()) {
+                total += PNG_SEPARACION_FILAS;
+            }
+        }
+
+        return total;
+    }
+
+    // ============================================================
     // LECTURA DEL CSV
     // ============================================================
 
@@ -1270,6 +1721,18 @@ public class GenerarTAF {
         FM,
         BECMG,
         TEMPO
+    }
+
+    private static class TarjetaPronostico {
+        String nombre;
+        List<String> lineas;
+        int alto;
+
+        TarjetaPronostico(String nombre, List<String> lineas, int alto) {
+            this.nombre = nombre;
+            this.lineas = lineas;
+            this.alto = alto;
+        }
     }
 
     private static class GrupoCambio {
