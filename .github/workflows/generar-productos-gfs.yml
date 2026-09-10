@@ -13,27 +13,42 @@ jobs:
     timeout-minutes: 360
 
     steps:
+
+      # =========================================================
+      # REPOSITORIO
+      # =========================================================
       - name: Descargar repositorio
         uses: actions/checkout@v4
 
+
+      # =========================================================
+      # JAVA
+      # =========================================================
       - name: Instalar Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 17
 
+
+      # =========================================================
+      # PYTHON
+      # =========================================================
       - name: Instalar Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
+
       - name: Verificar Python
         run: |
           python --version
 
+
       - name: Instalar librerías meteorológicas
         run: |
           python -m pip install --upgrade pip
+
           pip install \
             numpy \
             pandas \
@@ -44,54 +59,125 @@ jobs:
             metpy \
             cartopy
 
+
       - name: Verificar scripts Python
         run: |
           echo "Contenido carpeta python:"
           ls -la python
 
+
+      # =========================================================
+      # COMPILACIÓN JAVA
+      # =========================================================
       - name: Compilar proyecto Java
         run: |
           mvn clean package
 
+
+      # =========================================================
+      # SOUNDINGS
+      # =========================================================
       - name: Ejecutar generador de soundings
         run: |
           mvn exec:java -Dexec.mainClass=GenerarSoundingsAutomaticoGFS
 
+
+      # =========================================================
+      # CARTAS + METEOGRAMAS + TAF
+      # =========================================================
       - name: Ejecutar generador meteorologico
         run: |
           java -jar target/generador-cartas-gfs-1.0.0-jar-with-dependencies.jar
 
+
+      # =========================================================
+      # CONTROL DE SALIDAS
+      # =========================================================
       - name: Mostrar carpetas generadas
         if: always()
         run: |
           echo "===== GRIBS ====="
-          find gribs -type f 2>/dev/null | head -50
+          find gribs -type f 2>/dev/null | head -50 || true
 
           echo "===== SALIDAS ====="
-          find salidas -type f 2>/dev/null | head -100
+          find salidas -type f 2>/dev/null | head -200 || true
 
+          echo "===== TAF ====="
+          find salidas -type f \( -name "TAF_*.txt" -o -name "datos_taf_*.csv" \) 2>/dev/null || true
+
+
+      # =========================================================
+      # NOMBRE DE LOS ARTIFACTS
+      # =========================================================
       - name: Generar nombre del artifact
         id: nombre
         if: always()
         run: |
           FECHA=$(date -u +'%d%m%Y')
           HORA=$(date -u +'%H')
+
           echo "artifact_name=${FECHA}${HORA}UTC" >> $GITHUB_OUTPUT
 
+
+      # =========================================================
+      # DIVISIÓN DE PRODUCTOS
+      # =========================================================
       - name: Dividir productos en ZIP
         if: always()
         run: |
           mkdir -p paquetes
 
-          zip -r "paquetes/${{ steps.nombre.outputs.artifact_name }}_cartas.zip" salidas/*/cartas* || true
+          echo "======================================="
+          echo "GENERANDO ZIP DE CARTAS"
+          echo "======================================="
 
-          zip -r "paquetes/${{ steps.nombre.outputs.artifact_name }}_meteogramas.zip" salidas/*/meteogramas* || true
+          zip -r \
+            "paquetes/${{ steps.nombre.outputs.artifact_name }}_cartas.zip" \
+            salidas/*/cartas* \
+            || true
 
-          zip -r "paquetes/${{ steps.nombre.outputs.artifact_name }}_soundings.zip" salidas/*/soundings* || true
 
-          echo "===== PAQUETES GENERADOS ====="
+          echo "======================================="
+          echo "GENERANDO ZIP DE METEOGRAMAS"
+          echo "======================================="
+
+          zip -r \
+            "paquetes/${{ steps.nombre.outputs.artifact_name }}_meteogramas.zip" \
+            salidas/*/meteogramas* \
+            || true
+
+
+          echo "======================================="
+          echo "GENERANDO ZIP DE SOUNDINGS"
+          echo "======================================="
+
+          zip -r \
+            "paquetes/${{ steps.nombre.outputs.artifact_name }}_soundings.zip" \
+            salidas/*/soundings* \
+            || true
+
+
+          echo "======================================="
+          echo "GENERANDO ZIP DE TAF"
+          echo "======================================="
+
+          zip -r \
+            "paquetes/${{ steps.nombre.outputs.artifact_name }}_taf.zip" \
+            salidas/*/taf* \
+            salidas/*/datos_taf_*.csv \
+            || true
+
+
+          echo "======================================="
+          echo "PAQUETES GENERADOS"
+          echo "======================================="
+
           ls -lh paquetes
 
+
+      # =========================================================
+      # SUBIR ARTIFACT
+      # =========================================================
       - name: Subir resultados divididos
         if: always()
         uses: actions/upload-artifact@v4
