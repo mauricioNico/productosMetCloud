@@ -228,19 +228,19 @@ public class DescargaGFSMenu {
         int tafGenerados = 0;
 
         System.out.println("\n========================================");
-        System.out.println("GENERACIÓN AUTOMÁTICA DE TAF");
+        System.out.println("GENERACIÓN AUTOMÁTICA DE PRONÓSTICOS 24 H");
         System.out.println("========================================");
 
         if (Files.exists(Path.of(archivoDatosTAF))) {
             try {
-                GenerarTAF.generar(archivoDatosTAF, carpetaTAF);
+                GenerarTAF.generar(archivoDatosTAF, carpetaTAF, fecha, cicloStr);
                 try (Stream<Path> stream = Files.list(Path.of(carpetaTAF))) {
                     tafGenerados = (int) stream
                             .filter(p -> p.getFileName().toString().startsWith("pronosticos_automaticos_"))
                             .filter(p -> p.getFileName().toString().endsWith(".png"))
                             .count();
                 }
-                System.out.println("✔ Producto PNG de pronósticos generado: " + tafGenerados);
+                System.out.println("✔ Producto PNG de pronósticos 24 h generado: " + tafGenerados);
             } catch (Exception e) {
                 System.out.println("❌ Error al generar TAF: " + e.getMessage());
                 e.printStackTrace();
