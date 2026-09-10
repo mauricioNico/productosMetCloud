@@ -324,6 +324,123 @@ def normalizar_velocidad_kt_desde_da(da):
     return val * 1.94384
 
 
+
+def normalizar_altura_m_desde_da(da):
+    """
+    Devuelve altura/geopotencial en metros.
+    - HGT/gh suele venir en gpm, numéricamente equivalente a metros para este uso.
+    - z puede venir como geopotencial en m2/s2 y se divide por g.
+    """
+    if da is None:
+        return np.nan
+
+    try:
+        val = float(np.asarray(da.values).squeeze())
+    except Exception:
+        return np.nan
+
+    if not np.isfinite(val):
+        return np.nan
+
+    unidades = str(da.attrs.get("units", "")).lower().strip()
+
+    if (
+        "m**2 s**-2" in unidades
+        or "m2 s-2" in unidades
+        or "m^2 s^-2" in unidades
+        or "m²" in unidades
+    ):
+        return val / 9.80665
+
+    return val
+
+
+def calcular_direccion_viento(u, v):
+    """
+    Dirección meteorológica DESDE la cual sopla el viento.
+    U y V en cualquier unidad consistente.
+    """
+    u = np.asarray(u, dtype=float)
+    v = np.asarray(v, dtype=float)
+
+    direccion = (np.degrees(np.arctan2(-u, -v)) + 360.0) % 360.0
+    calma = np.sqrt(u ** 2 + v ** 2) < 0.25
+    direccion = np.where(calma, np.nan, direccion)
+
+    return direccion
+
+
+def exportar_datos_taf(df, nombre_punto, archivo_csv):
+    """
+    Agrega/reemplaza en un único CSV las filas correspondientes a una localidad.
+    Si se vuelve a ejecutar la misma localidad, se reemplazan sus registros para
+    evitar duplicados.
+    """
+    archivo_csv = Path(archivo_csv)
+    archivo_csv.parent.mkdir(parents=True, exist_ok=True)
+
+    columnas = [
+        "nombre",
+        "fecha_hora",
+        "wind_dir",
+        "wind_kt",
+        "gust_kt",
+        "vis_m",
+        "temp_c",
+        "td_c",
+        "rh",
+        "precip_mm",
+        "conv_precip_mm",
+        "cape",
+        "cin",
+        "reflectivity_dbz",
+        "low_cloud_pct",
+        "ceiling_ft_agl",
+    ]
+
+    salida = pd.DataFrame({
+        "nombre": nombre_punto,
+        "fecha_hora": pd.to_datetime(df["tiempo"]).dt.strftime("%Y-%m-%dT%H:%M"),
+        "wind_dir": df["wind_dir"],
+        "wind_kt": df["wind10_kt"],
+        "gust_kt": df["gust10_kt"],
+        "vis_m": df["vis_m"],
+        "temp_c": df["t2m"],
+        "td_c": df["td2m"],
+        "rh": df["rh2m"],
+        "precip_mm": df["tp_intervalo"],
+        "conv_precip_mm": df["acpcp_intervalo"],
+        "cape": df["cape"],
+        "cin": df["cin"],
+        "reflectivity_dbz": df["refc"],
+        "low_cloud_pct": df["lcdc"],
+        "ceiling_ft_agl": df["ceiling_ft_agl"],
+    })
+
+    salida = salida[columnas]
+
+    if archivo_csv.exists():
+        try:
+            anterior = pd.read_csv(archivo_csv, sep=";", dtype={"nombre": str})
+            if "nombre" in anterior.columns:
+                anterior = anterior[anterior["nombre"] != nombre_punto]
+            combinado = pd.concat([anterior, salida], ignore_index=True)
+        except Exception:
+            combinado = salida
+    else:
+        combinado = salida
+
+    combinado.to_csv(
+        archivo_csv,
+        sep=";",
+        index=False,
+        encoding="utf-8",
+        na_rep=""
+    )
+
+    print(f"✔ Datos TAF actualizados: {archivo_csv.resolve()}")
+
+
 def leer_tiempo_archivo(archivo):
     candidatos = [
         abrir_por_shortname(archivo, "prmsl"),
@@ -546,8 +663,11 @@ def color_cape(valor):
 
 
 def main():
-    if len(sys.argv) < 6:
-        print("Uso: meteograma_gfs.py carpeta_gribs carpeta_salidas lat lon nombre_punto")
+    if len(sys.argv) < 7:
+        print(
+            "Uso: meteograma_gfs.py carpeta_gribs carpeta_salidas "
+            "lat lon nombre_punto archivo_datos_taf"
+        )
         sys.exit(1)
 
     carpeta_gribs = Path(sys.argv[1])
@@ -555,6 +675,7 @@ def main():
     lat = float(sys.argv[3])
     lon = float(sys.argv[4])
     nombre_punto = sys.argv[5]
+    archivo_datos_taf = Path(sys.argv[6])
 
     if not carpeta_gribs.exists():
         print(f"❌ No existe la carpeta: {carpeta_gribs}")
@@ -587,6 +708,15 @@ def main():
     gust10_kt_list = []
     tp_acum_list = []
 
+    # Variables adicionales para TAF
+    vis_list = []
+    acpcp_acum_list = []
+    cin_list = []
+    refc_list = []
+    lcdc_list = []
+    ceiling_msl_m_list = []
+    surface_hgt_m_list = []
+
     perfiles_t = []
     perfiles_rh = []
     perfiles_u = []
@@ -618,8 +748,52 @@ def main():
         ])
 
         ds_tp = abrir_por_shortname(archivo, "tp")
-        if ds_tp is None:
-            ds_tp = abrir_por_shortname(archivo, "acpcp")
+
+        # Visibilidad de superficie
+        ds_vis = abrir_con_filtros_posibles(archivo, [
+            {"shortName": "vis", "typeOfLevel": "surface"},
+            {"shortName": "vis"}
+        ])
+
+        # Precipitación convectiva acumulada
+        ds_acpcp = abrir_con_filtros_posibles(archivo, [
+            {"shortName": "acpcp", "typeOfLevel": "surface"},
+            {"shortName": "acpcp"}
+        ])
+
+        # Inhibición convectiva
+        ds_cin = abrir_con_filtros_posibles(archivo, [
+            {"shortName": "cin", "typeOfLevel": "surface"},
+            {"shortName": "cin", "typeOfLevel": "heightAboveGroundLayer"},
+            {"shortName": "cin"}
+        ])
+
+        # Reflectividad compuesta
+        ds_refc = abrir_con_filtros_posibles(archivo, [
+            {"shortName": "refc", "typeOfLevel": "atmosphere"},
+            {"shortName": "refc", "typeOfLevel": "entireAtmosphere"},
+            {"shortName": "refc"}
+        ])
+
+        # Cobertura de nubes bajas
+        ds_lcdc = abrir_con_filtros_posibles(archivo, [
+            {"shortName": "lcc", "typeOfLevel": "lowCloudLayer"},
+            {"shortName": "lcdc", "typeOfLevel": "lowCloudLayer"},
+            {"shortName": "lcc"},
+            {"shortName": "lcdc"}
+        ])
+
+        # Altura de techo nuboso (MSL) y altura de superficie.
+        ds_ceiling = abrir_con_filtros_posibles(archivo, [
+            {"shortName": "gh", "typeOfLevel": "cloudCeiling"},
+            {"shortName": "z", "typeOfLevel": "cloudCeiling"}
+        ])
+
+        ds_surface_hgt = abrir_con_filtros_posibles(archivo, [
+            {"shortName": "orog", "typeOfLevel": "surface"},
+            {"shortName": "gh", "typeOfLevel": "surface"},
+            {"shortName": "z", "typeOfLevel": "surface"}
+        ])
 
         ds_cape = abrir_con_filtros_posibles(archivo, [
             {"shortName": "cape", "typeOfLevel": "surface"},
@@ -705,6 +879,23 @@ def main():
         da_tp = extraer_dataarray_punto(ds_tp, lat, lon)
         tp = normalizar_precip_mm_desde_da(da_tp)
 
+        vis_m = extraer_escalar_desde_ds(ds_vis, lat, lon)
+
+        da_acpcp = extraer_dataarray_punto(ds_acpcp, lat, lon)
+        acpcp = normalizar_precip_mm_desde_da(da_acpcp)
+
+        cin = extraer_escalar_desde_ds(ds_cin, lat, lon)
+        refc = extraer_escalar_desde_ds(ds_refc, lat, lon)
+
+        lcdc = extraer_escalar_desde_ds(ds_lcdc, lat, lon)
+        lcdc = normalizar_porcentaje(lcdc)
+
+        da_ceiling = extraer_dataarray_punto(ds_ceiling, lat, lon)
+        ceiling_msl_m = normalizar_altura_m_desde_da(da_ceiling)
+
+        da_surface_hgt = extraer_dataarray_punto(ds_surface_hgt, lat, lon)
+        surface_hgt_m = normalizar_altura_m_desde_da(da_surface_hgt)
+
         lev_t, val_t = extraer_perfil_isobarico(ds_t, lat, lon)
         lev_r, val_r = extraer_perfil_isobarico(ds_r, lat, lon)
         lev_u, val_u = extraer_perfil_isobarico(ds_u, lat, lon)
@@ -732,6 +923,13 @@ def main():
             f"TPacum={tp:.3f} mm | unidades={unidades_tp}"
         )
 
+        print(
+            f"  TAF -> VIS={vis_m:.0f} m | ACPCP={acpcp:.3f} mm | "
+            f"CIN={cin:.1f} | REFC={refc:.1f} dBZ | "
+            f"LCDC={lcdc:.1f}% | CEIL_MSL={ceiling_msl_m:.0f} m | "
+            f"SFC_HGT={surface_hgt_m:.0f} m"
+        )
+
         tiempos.append(tiempo)
 
         mslp_list.append(mslp)
@@ -746,6 +944,14 @@ def main():
         v10_list.append(v10)
         gust10_kt_list.append(gust10_kt)
         tp_acum_list.append(tp)
+
+        vis_list.append(vis_m)
+        acpcp_acum_list.append(acpcp)
+        cin_list.append(cin)
+        refc_list.append(refc)
+        lcdc_list.append(lcdc)
+        ceiling_msl_m_list.append(ceiling_msl_m)
+        surface_hgt_m_list.append(surface_hgt_m)
 
         perfiles_t.append(perfil_t)
         perfiles_rh.append(perfil_r)
@@ -768,7 +974,14 @@ def main():
         "u10": u10_list,
         "v10": v10_list,
         "gust10_kt": gust10_kt_list,
-        "tp_acum": tp_acum_list
+        "tp_acum": tp_acum_list,
+        "vis_m": vis_list,
+        "acpcp_acum": acpcp_acum_list,
+        "cin": cin_list,
+        "refc": refc_list,
+        "lcdc": lcdc_list,
+        "ceiling_msl_m": ceiling_msl_m_list,
+        "surface_hgt_m": surface_hgt_m_list
     })
 
     df["tiempo"] = pd.to_datetime(df["tiempo"])
@@ -789,7 +1002,23 @@ def main():
     )
 
     df["wind10_kt"] = np.sqrt(df["u10"] ** 2 + df["v10"] ** 2) * 1.94384
+    df["wind_dir"] = calcular_direccion_viento(df["u10"].values, df["v10"].values)
+
     df["tp_intervalo"] = calcular_precipitacion_intervalo(df["tp_acum"].values)
+    df["acpcp_intervalo"] = calcular_precipitacion_intervalo(
+        df["acpcp_acum"].values
+    )
+
+    # El HGT de cloud ceiling es altura geopotencial MSL. Para TAF necesitamos AGL.
+    df["ceiling_ft_agl"] = np.where(
+        np.isfinite(df["ceiling_msl_m"]) & np.isfinite(df["surface_hgt_m"]),
+        np.maximum(df["ceiling_msl_m"] - df["surface_hgt_m"], 0.0) * 3.28084,
+        np.nan
+    )
+
+    # Exportar antes del gráfico: si faltara alguna variable opcional, se escribe
+    # como campo vacío sin impedir la generación del meteograma.
+    exportar_datos_taf(df, nombre_punto, archivo_datos_taf)
 
     if not np.isfinite(df["gust10_kt"]).any():
         print(
