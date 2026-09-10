@@ -236,11 +236,11 @@ public class DescargaGFSMenu {
                 GenerarTAF.generar(archivoDatosTAF, carpetaTAF);
                 try (Stream<Path> stream = Files.list(Path.of(carpetaTAF))) {
                     tafGenerados = (int) stream
-                            .filter(p -> p.getFileName().toString().startsWith("TAF_"))
-                            .filter(p -> p.getFileName().toString().endsWith(".txt"))
+                            .filter(p -> p.getFileName().toString().startsWith("pronosticos_automaticos_"))
+                            .filter(p -> p.getFileName().toString().endsWith(".png"))
                             .count();
                 }
-                System.out.println("✔ TAF generados: " + tafGenerados);
+                System.out.println("✔ Producto PNG de pronósticos generado: " + tafGenerados);
             } catch (Exception e) {
                 System.out.println("❌ Error al generar TAF: " + e.getMessage());
                 e.printStackTrace();
@@ -267,7 +267,7 @@ public class DescargaGFSMenu {
         System.out.println("Cartas con error:    " + cartasFail);
         System.out.println("Meteogramas OK:      " + meteogramasOk);
         System.out.println("Meteogramas error:   " + meteogramasFail);
-        System.out.println("TAF generados:       " + tafGenerados);
+        System.out.println("PNG pronósticos:     " + tafGenerados);
         System.out.println("Carpeta cartas:      " + carpetaCartas);
         System.out.println("  → Cortoplazo (12/24/36h): " + carpetaCartas + "/cortoplazo");
         System.out.println("  → Largo plazo (48-84h):   " + carpetaCartas + "/largo_plazo");
