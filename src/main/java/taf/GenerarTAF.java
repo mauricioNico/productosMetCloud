@@ -13,6 +13,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
@@ -54,7 +55,7 @@ public class GenerarTAF {
     // CONFIGURACION GENERAL
     // ============================================================
 
-    private static final int HORAS_VALIDEZ = 12;
+    private static final int HORAS_VALIDEZ = 24;
 
     // Producto PNG único
     private static final int PNG_ANCHO = 1800;
@@ -114,7 +115,6 @@ public class GenerarTAF {
 
         // Necesario para GitHub Actions / servidores Linux sin entorno gráfico.
         System.setProperty("java.awt.headless", "true");
-
         Locale.setDefault(Locale.US);
 
         if (args.length < 1) {
@@ -128,93 +128,43 @@ public class GenerarTAF {
                 ? Paths.get(args[1])
                 : Paths.get("taf_salida");
 
-        Path rutaEscudo = args.length >= 3
-                ? Paths.get(args[2])
-                : Paths.get(RUTA_ESCUDO_PREDETERMINADA);
+        String fecha = null;
+        String cicloStr = null;
+        Path rutaEscudo = Paths.get(RUTA_ESCUDO_PREDETERMINADA);
+
+        /*
+         * Formas admitidas:
+         *
+         * 1) java taf.GenerarTAF datos.csv carpeta
+         *    -> fecha/ciclo se infieren cuando es posible.
+         *
+         * 2) java taf.GenerarTAF datos.csv carpeta imagenes/escudo_dmm.png
+         *    -> compatibilidad con la versión anterior.
+         *
+         * 3) java taf.GenerarTAF datos.csv carpeta 20260910 12
+         *    -> fecha y ciclo explícitos.
+         *
+         * 4) java taf.GenerarTAF datos.csv carpeta 20260910 12 imagenes/escudo_dmm.png
+         */
+        if (args.length >= 4) {
+            fecha = args[2];
+            cicloStr = args[3];
+
+            if (args.length >= 5) {
+                rutaEscudo = Paths.get(args[4]);
+            }
+        } else if (args.length >= 3) {
+            rutaEscudo = Paths.get(args[2]);
+        }
 
         try {
-            if (!Files.exists(archivoEntrada)) {
-                System.err.println("ERROR: No existe el archivo: " + archivoEntrada.toAbsolutePath());
-                return;
-            }
-
-            Files.createDirectories(carpetaSalida);
-            limpiarSalidasAnteriores(carpetaSalida);
-
-            List<RegistroHorario> registros = leerCSV(archivoEntrada);
-
-            if (registros.isEmpty()) {
-                System.err.println("ERROR: El CSV no contiene registros utilizables.");
-                return;
-            }
-
-            Map<String, List<RegistroHorario>> porLocalidad = agruparPorLocalidad(registros);
-            Map<String, String> pronosticos = new LinkedHashMap<>();
-
-            LocalDateTime inicioGeneral = null;
-
-            System.out.println("====================================================");
-            System.out.println(" GENERADOR DE PRONOSTICOS AUTOMATICOS - PNG UNICO");
-            System.out.println("====================================================");
-            System.out.println("Archivo: " + archivoEntrada.toAbsolutePath());
-            System.out.println("Localidades encontradas: " + porLocalidad.size());
-            System.out.println();
-
-            for (Map.Entry<String, List<RegistroHorario>> entry : porLocalidad.entrySet()) {
-
-                String nombre = entry.getKey();
-                List<RegistroHorario> datos = entry.getValue();
-
-                try {
-                    datos.sort(Comparator.comparing(r -> r.fechaHora));
-
-                    if (!datos.isEmpty()) {
-                        LocalDateTime inicioLocal = datos.get(0).fechaHora;
-                        if (inicioGeneral == null || inicioLocal.isBefore(inicioGeneral)) {
-                            inicioGeneral = inicioLocal;
-                        }
-                    }
-
-                    String taf = generarTAF(datos);
-                    pronosticos.put(nombre, taf);
-
-                    System.out.println("OK  " + nombre);
-
-                } catch (Exception e) {
-                    System.err.println("ERROR generando pronostico para " + nombre + ": " + e.getMessage());
-                }
-            }
-
-            if (pronosticos.isEmpty() || inicioGeneral == null) {
-                System.err.println("ERROR: No se pudo generar ningún pronóstico.");
-                return;
-            }
-
-            LocalDateTime finGeneral = inicioGeneral.plusHours(HORAS_VALIDEZ);
-            LocalDateTime emisionGeneral = LocalDateTime.now(ZoneOffset.UTC);
-
-            String nombrePng = String.format(
-                    "pronosticos_automaticos_%04d%02d%02d_%02dZ.png",
-                    inicioGeneral.getYear(),
-                    inicioGeneral.getMonthValue(),
-                    inicioGeneral.getDayOfMonth(),
-                    inicioGeneral.getHour()
+            ejecutar(
+                    archivoEntrada,
+                    carpetaSalida,
+                    fecha,
+                    cicloStr,
+                    rutaEscudo
             );
-
-            Path salidaPng = carpetaSalida.resolve(nombrePng);
-
-            generarProductoPNG(
-                    pronosticos,
-                    salidaPng,
-                    rutaEscudo,
-                    emisionGeneral,
-                    inicioGeneral,
-                    finGeneral
-            );
-
-            System.out.println();
-            System.out.println("PNG generado: " + salidaPng.toAbsolutePath());
-            System.out.println("Proceso finalizado.");
 
         } catch (Exception e) {
             System.err.println("ERROR GENERAL: " + e.getMessage());
@@ -223,27 +173,270 @@ public class GenerarTAF {
     }
 
     /**
-     * Mantiene la interfaz usada por DescargaGFSMenu.
-     * No hace falta modificar la llamada existente.
+     * Compatibilidad con llamadas anteriores.
+     * Si no se suministran fecha/ciclo, se intentan inferir del CSV.
      */
     public static void generar(String archivoCsv, String carpetaSalida) {
-        main(new String[]{archivoCsv, carpetaSalida});
+        try {
+            ejecutar(
+                    Paths.get(archivoCsv),
+                    Paths.get(carpetaSalida),
+                    null,
+                    null,
+                    Paths.get(RUTA_ESCUDO_PREDETERMINADA)
+            );
+        } catch (Exception e) {
+            throw new RuntimeException("Error generando pronósticos automáticos", e);
+        }
     }
 
     /**
-     * Variante opcional para indicar otra imagen de escudo.
+     * Método utilizado por DescargaGFSMenu.
+     *
+     * La fecha corresponde a la fecha de la corrida GFS y cicloStr al ciclo
+     * detectado (00, 06, 12 o 18). La hora de emisión/validez del producto
+     * se fija en:
+     *
+     *   ciclos 00/06 -> 12Z, válido 12/12
+     *   ciclos 12/18 -> 18Z, válido 18/18
      */
-    public static void generar(String archivoCsv, String carpetaSalida, String rutaEscudo) {
-        main(new String[]{archivoCsv, carpetaSalida, rutaEscudo});
+    public static void generar(
+            String archivoCsv,
+            String carpetaSalida,
+            String fecha,
+            String cicloStr) {
+
+        try {
+            ejecutar(
+                    Paths.get(archivoCsv),
+                    Paths.get(carpetaSalida),
+                    fecha,
+                    cicloStr,
+                    Paths.get(RUTA_ESCUDO_PREDETERMINADA)
+            );
+        } catch (Exception e) {
+            throw new RuntimeException("Error generando pronósticos automáticos", e);
+        }
+    }
+
+    /**
+     * Variante con ruta de escudo explícita.
+     */
+    public static void generar(
+            String archivoCsv,
+            String carpetaSalida,
+            String fecha,
+            String cicloStr,
+            String rutaEscudo) {
+
+        try {
+            ejecutar(
+                    Paths.get(archivoCsv),
+                    Paths.get(carpetaSalida),
+                    fecha,
+                    cicloStr,
+                    Paths.get(rutaEscudo)
+            );
+        } catch (Exception e) {
+            throw new RuntimeException("Error generando pronósticos automáticos", e);
+        }
+    }
+
+    private static void ejecutar(
+            Path archivoEntrada,
+            Path carpetaSalida,
+            String fecha,
+            String cicloStr,
+            Path rutaEscudo) throws IOException {
+
+        System.setProperty("java.awt.headless", "true");
+        Locale.setDefault(Locale.US);
+
+        if (!Files.exists(archivoEntrada)) {
+            throw new IOException(
+                    "No existe el archivo: " + archivoEntrada.toAbsolutePath()
+            );
+        }
+
+        Files.createDirectories(carpetaSalida);
+        limpiarSalidasAnteriores(carpetaSalida);
+
+        List<RegistroHorario> registros = leerCSV(archivoEntrada);
+
+        if (registros.isEmpty()) {
+            throw new IOException("El CSV no contiene registros utilizables.");
+        }
+
+        Map<String, List<RegistroHorario>> porLocalidad = agruparPorLocalidad(registros);
+
+        LocalDateTime inicioValidez = calcularInicioValidez(
+                fecha,
+                cicloStr,
+                archivoEntrada,
+                registros
+        );
+
+        LocalDateTime finValidez = inicioValidez.plusHours(HORAS_VALIDEZ);
+
+        /*
+         * En este producto la emisión general coincide con el comienzo
+         * de la validez solicitada:
+         *
+         * mañana -> 12Z / tarde -> 18Z.
+         */
+        LocalDateTime emisionGeneral = inicioValidez;
+
+        Map<String, PronosticoLocalidad> pronosticos = new LinkedHashMap<>();
+
+        System.out.println("====================================================");
+        System.out.println(" GENERADOR DE PRONOSTICOS AUTOMATICOS - PNG UNICO");
+        System.out.println("====================================================");
+        System.out.println("Archivo: " + archivoEntrada.toAbsolutePath());
+        System.out.println("Localidades encontradas: " + porLocalidad.size());
+        System.out.println("Emision general: " + formatearEmisionTexto(emisionGeneral));
+        System.out.println("Validez: " + formatearValidezTexto(inicioValidez, finValidez));
+        System.out.println();
+
+        for (Map.Entry<String, List<RegistroHorario>> entry : porLocalidad.entrySet()) {
+
+            String nombre = entry.getKey();
+            List<RegistroHorario> datos = entry.getValue();
+
+            try {
+                PronosticoLocalidad pronostico = generarPronostico(
+                        nombre,
+                        datos,
+                        inicioValidez,
+                        finValidez
+                );
+
+                pronosticos.put(nombre, pronostico);
+
+                System.out.printf(
+                        Locale.US,
+                        "OK  %s | Tmax %.1f C | Tmin %.1f C%n",
+                        nombre,
+                        pronostico.tmax,
+                        pronostico.tmin
+                );
+
+            } catch (Exception e) {
+                System.err.println(
+                        "ERROR generando pronostico para " + nombre + ": " + e.getMessage()
+                );
+            }
+        }
+
+        if (pronosticos.isEmpty()) {
+            throw new IOException("No se pudo generar ningún pronóstico.");
+        }
+
+        String nombrePng = String.format(
+                "pronosticos_automaticos_%04d%02d%02d_%02dZ.png",
+                inicioValidez.getYear(),
+                inicioValidez.getMonthValue(),
+                inicioValidez.getDayOfMonth(),
+                inicioValidez.getHour()
+        );
+
+        Path salidaPng = carpetaSalida.resolve(nombrePng);
+
+        generarProductoPNG(
+                pronosticos,
+                salidaPng,
+                rutaEscudo,
+                emisionGeneral,
+                inicioValidez,
+                finValidez
+        );
+
+        System.out.println();
+        System.out.println("PNG generado: " + salidaPng.toAbsolutePath());
+        System.out.println("Proceso finalizado.");
+    }
+
+    private static LocalDateTime calcularInicioValidez(
+            String fecha,
+            String cicloStr,
+            Path archivoEntrada,
+            List<RegistroHorario> registros) {
+
+        String fechaEfectiva = fecha;
+        String cicloEfectivo = cicloStr;
+
+        if (fechaEfectiva == null || fechaEfectiva.isBlank()) {
+
+            LocalDateTime primero = registros.stream()
+                    .map(r -> r.fechaHora)
+                    .min(LocalDateTime::compareTo)
+                    .orElseThrow();
+
+            fechaEfectiva = primero.format(DateTimeFormatter.BASIC_ISO_DATE);
+        }
+
+        if (cicloEfectivo == null || cicloEfectivo.isBlank()) {
+            cicloEfectivo = inferirCicloDesdeNombre(archivoEntrada);
+
+            if (cicloEfectivo == null) {
+                /*
+                 * Respaldo: si no podemos inferir el ciclo del nombre del CSV,
+                 * usamos 12Z como producto matutino.
+                 */
+                cicloEfectivo = "00";
+            }
+        }
+
+        LocalDate dia = LocalDate.parse(
+                fechaEfectiva,
+                DateTimeFormatter.BASIC_ISO_DATE
+        );
+
+        int ciclo;
+        try {
+            ciclo = Integer.parseInt(cicloEfectivo);
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException(
+                    "Ciclo GFS inválido: " + cicloEfectivo
+            );
+        }
+
+        int horaEmision = ciclo < 12 ? 12 : 18;
+
+        return dia.atTime(horaEmision, 0);
+    }
+
+    private static String inferirCicloDesdeNombre(Path archivoEntrada) {
+
+        String nombre = archivoEntrada.getFileName().toString();
+
+        java.util.regex.Matcher m =
+                java.util.regex.Pattern.compile(
+                        ".*_([0-9]{2})\\.csv$",
+                        java.util.regex.Pattern.CASE_INSENSITIVE
+                ).matcher(nombre);
+
+        if (m.matches()) {
+            return m.group(1);
+        }
+
+        return null;
     }
 
     private static void mostrarAyuda() {
         System.out.println("""
-                Uso:
-                  java taf.GenerarTAF datos_taf.csv carpeta_salida
+                Uso recomendado desde DescargaGFSMenu:
+                  GenerarTAF.generar(archivoCsv, carpetaSalida, fecha, cicloStr)
 
-                Opcional:
-                  java taf.GenerarTAF datos_taf.csv carpeta_salida imagenes/escudo_dmm.png
+                Desde consola:
+                  java taf.GenerarTAF datos_taf.csv carpeta_salida 20260910 00
+                  java taf.GenerarTAF datos_taf.csv carpeta_salida 20260910 12
+
+                Opcionalmente:
+                  java taf.GenerarTAF datos_taf.csv carpeta_salida 20260910 12 imagenes/escudo_dmm.png
+
+                Reglas de validez:
+                  ciclos 00/06 -> emisión 12Z, validez 12/12
+                  ciclos 12/18 -> emisión 18Z, validez 18/18
 
                 El resultado es un único PNG con todos los pronósticos.
                 """);
@@ -273,12 +466,13 @@ public class GenerarTAF {
     // GENERACION DEL PRONOSTICO POR LOCALIDAD
     // ============================================================
 
-    private static String generarTAF(List<RegistroHorario> datos) {
+    private static PronosticoLocalidad generarPronostico(
+            String nombre,
+            List<RegistroHorario> datos,
+            LocalDateTime inicio,
+            LocalDateTime fin) {
 
         datos.sort(Comparator.comparing(r -> r.fechaHora));
-
-        LocalDateTime inicio = datos.get(0).fechaHora;
-        LocalDateTime fin = inicio.plusHours(HORAS_VALIDEZ);
 
         List<RegistroHorario> periodo = new ArrayList<>();
 
@@ -290,7 +484,8 @@ public class GenerarTAF {
 
         if (periodo.size() < 2) {
             throw new IllegalArgumentException(
-                    "Se necesitan al menos 2 tiempos de datos dentro del período de validez."
+                    "Se necesitan al menos 2 tiempos de datos dentro del período "
+                            + formatearValidezTexto(inicio, fin)
             );
         }
 
@@ -327,7 +522,38 @@ public class GenerarTAF {
             }
         }
 
-        return sb.toString();
+        RegistroHorario registroMax = null;
+        RegistroHorario registroMin = null;
+
+        for (RegistroHorario r : periodo) {
+
+            if (!Double.isFinite(r.temperaturaC)) {
+                continue;
+            }
+
+            if (registroMax == null || r.temperaturaC > registroMax.temperaturaC) {
+                registroMax = r;
+            }
+
+            if (registroMin == null || r.temperaturaC < registroMin.temperaturaC) {
+                registroMin = r;
+            }
+        }
+
+        double tmax = registroMax == null ? Double.NaN : registroMax.temperaturaC;
+        double tmin = registroMin == null ? Double.NaN : registroMin.temperaturaC;
+
+        LocalDateTime horaTmax = registroMax == null ? null : registroMax.fechaHora;
+        LocalDateTime horaTmin = registroMin == null ? null : registroMin.fechaHora;
+
+        return new PronosticoLocalidad(
+                nombre,
+                sb.toString(),
+                tmax,
+                tmin,
+                horaTmax,
+                horaTmin
+        );
     }
 
     // ============================================================
@@ -968,7 +1194,7 @@ public class GenerarTAF {
     // ============================================================
 
     private static void generarProductoPNG(
-            Map<String, String> pronosticos,
+            Map<String, PronosticoLocalidad> pronosticos,
             Path salidaPng,
             Path rutaEscudo,
             LocalDateTime emisionGeneral,
@@ -980,6 +1206,7 @@ public class GenerarTAF {
         Font fuenteMeta = new Font("SansSerif", Font.PLAIN, 22);
         Font fuenteAviso = new Font("SansSerif", Font.BOLD, 21);
         Font fuenteLugar = new Font("SansSerif", Font.BOLD, 25);
+        Font fuenteTemperatura = new Font("SansSerif", Font.BOLD, 18);
         Font fuenteTAF = new Font("Monospaced", Font.PLAIN, 20);
         Font fuentePie = new Font("SansSerif", Font.PLAIN, 16);
 
@@ -993,20 +1220,39 @@ public class GenerarTAF {
 
         FontMetrics fmTaf = ga.getFontMetrics(fuenteTAF);
         FontMetrics fmLugar = ga.getFontMetrics(fuenteLugar);
+        FontMetrics fmTemperatura = ga.getFontMetrics(fuenteTemperatura);
         FontMetrics fmAviso = ga.getFontMetrics(fuenteAviso);
 
         List<TarjetaPronostico> tarjetas = new ArrayList<>();
 
-        for (Map.Entry<String, String> entry : pronosticos.entrySet()) {
-            List<String> lineas = envolverTAF(entry.getValue(), fmTaf, anchoTextoTarjeta);
+        for (Map.Entry<String, PronosticoLocalidad> entry : pronosticos.entrySet()) {
+
+            PronosticoLocalidad p = entry.getValue();
+
+            List<String> lineas = envolverTAF(
+                    p.texto,
+                    fmTaf,
+                    anchoTextoTarjeta
+            );
+
+            String resumenTemperaturas = formatearTemperaturas(p);
 
             int altoTarjeta = 28
                     + fmLugar.getHeight()
-                    + 14
+                    + 12
+                    + fmTemperatura.getHeight()
+                    + 17
                     + lineas.size() * (fmTaf.getHeight() + 3)
                     + 26;
 
-            tarjetas.add(new TarjetaPronostico(entry.getKey(), lineas, altoTarjeta));
+            tarjetas.add(
+                    new TarjetaPronostico(
+                            entry.getKey(),
+                            resumenTemperaturas,
+                            lineas,
+                            altoTarjeta
+                    )
+            );
         }
 
         List<String> lineasAviso = envolverTexto(AVISO_ORIENTATIVO, fmAviso, anchoUtil - 60);
@@ -1081,8 +1327,9 @@ public class GenerarTAF {
                 yTitulo + 93
         );
         g.drawString(
-                "Validez orientativa: " + inicioValidez.format(fmtValidez)
-                        + " a " + finValidez.format(fmtValidez),
+                "Validez general: " + inicioValidez.format(fmtValidez)
+                        + " a " + finValidez.format(fmtValidez)
+                        + " (24 h)",
                 xTitulo,
                 yTitulo + 127
         );
@@ -1150,10 +1397,18 @@ public class GenerarTAF {
                 g.setColor(new Color(205, 214, 220));
                 g.drawLine(x + 22, y + 49, x + anchoColumna - 22, y + 49);
 
+                g.setFont(fuenteTemperatura);
+                g.setColor(new Color(65, 65, 65));
+                g.drawString(
+                        tarjeta.resumenTemperaturas,
+                        x + 22,
+                        y + 78
+                );
+
                 g.setFont(fuenteTAF);
                 g.setColor(Color.BLACK);
 
-                int yTaf = y + 78;
+                int yTaf = y + 112;
                 for (String linea : tarjeta.lineas) {
                     g.drawString(linea, x + 22, yTaf);
                     yTaf += fmTaf.getHeight() + 3;
@@ -1182,6 +1437,28 @@ public class GenerarTAF {
 
         Files.createDirectories(salidaPng.getParent());
         ImageIO.write(imagen, "png", salidaPng.toFile());
+    }
+
+    private static String formatearTemperaturas(PronosticoLocalidad p) {
+
+        String max = Double.isFinite(p.tmax)
+                ? String.format(Locale.US, "%.0f °C", p.tmax)
+                : "--";
+
+        String min = Double.isFinite(p.tmin)
+                ? String.format(Locale.US, "%.0f °C", p.tmin)
+                : "--";
+
+        String horaMax = p.horaTmax == null
+                ? ""
+                : String.format(" (%02dZ)", p.horaTmax.getHour());
+
+        String horaMin = p.horaTmin == null
+                ? ""
+                : String.format(" (%02dZ)", p.horaTmin.getHour());
+
+        return "Tmax " + max + horaMax
+                + "   |   Tmin " + min + horaMin;
     }
 
     private static void configurarRenderizado(Graphics2D g) {
@@ -1723,13 +2000,45 @@ public class GenerarTAF {
         TEMPO
     }
 
+    private static class PronosticoLocalidad {
+        String nombre;
+        String texto;
+        double tmax;
+        double tmin;
+        LocalDateTime horaTmax;
+        LocalDateTime horaTmin;
+
+        PronosticoLocalidad(
+                String nombre,
+                String texto,
+                double tmax,
+                double tmin,
+                LocalDateTime horaTmax,
+                LocalDateTime horaTmin) {
+
+            this.nombre = nombre;
+            this.texto = texto;
+            this.tmax = tmax;
+            this.tmin = tmin;
+            this.horaTmax = horaTmax;
+            this.horaTmin = horaTmin;
+        }
+    }
+
     private static class TarjetaPronostico {
         String nombre;
+        String resumenTemperaturas;
         List<String> lineas;
         int alto;
 
-        TarjetaPronostico(String nombre, List<String> lineas, int alto) {
+        TarjetaPronostico(
+                String nombre,
+                String resumenTemperaturas,
+                List<String> lineas,
+                int alto) {
+
             this.nombre = nombre;
+            this.resumenTemperaturas = resumenTemperaturas;
             this.lineas = lineas;
             this.alto = alto;
         }
