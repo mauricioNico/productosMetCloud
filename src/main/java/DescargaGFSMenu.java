@@ -11,6 +11,7 @@ import java.nio.file.StandardCopyOption;
 import java.time.LocalDate;
 import java.util.Set;
 import java.util.stream.Stream;
+import taf.GenerarTAF;
 
 public class DescargaGFSMenu {
 
@@ -102,9 +103,12 @@ public class DescargaGFSMenu {
          */
         String carpetaCartas = "salidas/" + fecha + "/cartas" + cicloStr;
         String carpetaMeteogramas = "salidas/" + fecha + "/meteogramas" + cicloStr;
+        String carpetaTAF = "salidas/" + fecha + "/taf" + cicloStr;
+        String archivoDatosTAF = "salidas/" + fecha + "/datos_taf_" + cicloStr + ".csv";
 
         new File(carpetaCartas).mkdirs();
         new File(carpetaMeteogramas).mkdirs();
+        new File(carpetaTAF).mkdirs();
         new File(carpetaCartas + "/cortoplazo").mkdirs();
         new File(carpetaCartas + "/largo_plazo").mkdirs();
 
@@ -115,6 +119,8 @@ public class DescargaGFSMenu {
         System.out.println("Cartas: " + HORAS_CARTAS);
         System.out.println("Carpeta cartas: " + carpetaCartas);
         System.out.println("Carpeta meteogramas: " + carpetaMeteogramas);
+        System.out.println("Carpeta TAF: " + carpetaTAF);
+        System.out.println("Datos TAF: " + archivoDatosTAF);
         System.out.println("Región:");
         System.out.println("  Top    = " + TOP);
         System.out.println("  Bottom = " + BOTTOM);
@@ -189,6 +195,13 @@ public class DescargaGFSMenu {
         System.out.println("========================================");
         System.out.println("Carpeta destino meteogramas: " + carpetaMeteogramas);
 
+        // El CSV se vuelve a crear en cada corrida para evitar duplicar registros.
+        try {
+            Files.deleteIfExists(Path.of(archivoDatosTAF));
+        } catch (IOException e) {
+            System.out.println("⚠ No se pudo limpiar el CSV TAF anterior: " + e.getMessage());
+        }
+
         for (PuntoMeteograma punto : PUNTOS_METEOGRAMA) {
             System.out.println("\n----------------------------------------");
             System.out.println("Meteograma: " + punto.nombre);
@@ -199,7 +212,8 @@ public class DescargaGFSMenu {
                     carpetaMeteogramas,
                     punto.lat,
                     punto.lon,
-                    punto.nombre
+                    punto.nombre,
+                    archivoDatosTAF
             );
 
             if (ok) {
@@ -209,6 +223,31 @@ public class DescargaGFSMenu {
                 meteogramasFail++;
                 System.out.println("❌ Falló meteograma: " + punto.nombre);
             }
+        }
+
+        int tafGenerados = 0;
+
+        System.out.println("\n========================================");
+        System.out.println("GENERACIÓN AUTOMÁTICA DE TAF");
+        System.out.println("========================================");
+
+        if (Files.exists(Path.of(archivoDatosTAF))) {
+            try {
+                GenerarTAF.generar(archivoDatosTAF, carpetaTAF);
+                try (Stream<Path> stream = Files.list(Path.of(carpetaTAF))) {
+                    tafGenerados = (int) stream
+                            .filter(p -> p.getFileName().toString().startsWith("TAF_"))
+                            .filter(p -> p.getFileName().toString().endsWith(".txt"))
+                            .count();
+                }
+                System.out.println("✔ TAF generados: " + tafGenerados);
+            } catch (Exception e) {
+                System.out.println("❌ Error al generar TAF: " + e.getMessage());
+                e.printStackTrace();
+            }
+        } else {
+            System.out.println("⚠ No se encontró el archivo de datos TAF: " + archivoDatosTAF);
+            System.out.println("  Se omite la generación de TAF.");
         }
 
         if (BORRAR_GRIBS_AL_FINAL) {
@@ -228,10 +267,13 @@ public class DescargaGFSMenu {
         System.out.println("Cartas con error:    " + cartasFail);
         System.out.println("Meteogramas OK:      " + meteogramasOk);
         System.out.println("Meteogramas error:   " + meteogramasFail);
+        System.out.println("TAF generados:       " + tafGenerados);
         System.out.println("Carpeta cartas:      " + carpetaCartas);
         System.out.println("  → Cortoplazo (12/24/36h): " + carpetaCartas + "/cortoplazo");
         System.out.println("  → Largo plazo (48-84h):   " + carpetaCartas + "/largo_plazo");
         System.out.println("Carpeta meteogramas: " + carpetaMeteogramas);
+        System.out.println("Carpeta TAF:         " + carpetaTAF);
+        System.out.println("Datos TAF:           " + archivoDatosTAF);
         System.out.println("Proceso terminado.");
     }
 
@@ -496,7 +538,8 @@ public class DescargaGFSMenu {
                                                       String carpetaMeteogramas,
                                                       double latPunto,
                                                       double lonPunto,
-                                                      String nombrePunto) {
+                                                      String nombrePunto,
+                                                      String archivoDatosTAF) {
 
         try {
             new File(carpetaMeteogramas).mkdirs();
@@ -505,6 +548,7 @@ public class DescargaGFSMenu {
             System.out.println("  Punto: " + nombrePunto + " | Lat: " + latPunto + " | Lon: " + lonPunto);
             System.out.println("  Carpeta GRIB: " + carpetaGribs);
             System.out.println("  Carpeta salida meteograma: " + carpetaMeteogramas);
+            System.out.println("  Datos TAF: " + archivoDatosTAF);
 
             ProcessBuilder pb = new ProcessBuilder(
                     PYTHON_CMD,
@@ -513,7 +557,8 @@ public class DescargaGFSMenu {
                     carpetaMeteogramas,
                     String.valueOf(latPunto),
                     String.valueOf(lonPunto),
-                    nombrePunto
+                    nombrePunto,
+                    archivoDatosTAF
             );
 
             pb.directory(new File("."));
