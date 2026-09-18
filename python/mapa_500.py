@@ -153,7 +153,7 @@ def main():
 
     ciclo = re.search(r"_(\d{2})_f", archivo.name)
     ciclo_txt = f"{ciclo.group(1)}Z" if ciclo else "??Z"
-    ax.set_title("Departamento Meteorología Militar\n"
+    ax.set_title("Departamento Meteorología Militar - MODELO GFS 0.25\n"
                  "500 hPa: altura geopotencial (dam) y vorticidad relativa\n"
                  f"Inicio: {fecha_es(inicio)} | Validez: {fecha_es(valida)} "
                  f"(H+{horas}, salida {ciclo_txt})", fontsize=11, fontweight="bold", pad=10)
