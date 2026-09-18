@@ -176,7 +176,7 @@ def main():
     fig.text(
         0.46,
         0.974,
-        "Departamento Meteorología Militar",
+        "Departamento Meteorología Militar - MODELO GFS 0.25",
         ha="center",
         va="top",
         fontsize=11,
