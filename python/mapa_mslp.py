@@ -788,7 +788,7 @@ def main():
         pass
 
     titulo = (
-        "Departamento Meteorología Militar\n"
+        "Departamento Meteorología Militar - MODELO GFS 0.25\n"
         "Superficie y espesores, precipitación, viento fuerte, cielo cubierto y áreas con nieve\n"
         f"Inicio: {init_str}  |  Validez: {valid_str}  (H+{horas_pron}, salida {ciclo_txt})"
     )
