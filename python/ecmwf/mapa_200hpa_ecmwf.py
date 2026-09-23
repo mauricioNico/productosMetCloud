@@ -461,3 +461,9 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+    # Evita el teardown problemático de cfgrib/eccodes en algunos runners Linux
+    # una vez que main() terminó correctamente y el PNG ya fue guardado.
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(0)
