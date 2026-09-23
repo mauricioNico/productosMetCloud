@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 import sys
+import os
+import re
 from pathlib import Path
 import re
 import logging
@@ -684,6 +686,15 @@ def main():
     carpeta_salidas.mkdir(parents=True, exist_ok=True)
 
     archivos = sorted(carpeta_gribs.glob("*.grib2"))
+    hora_final_meteograma = int(os.getenv("GFS_METEOGRAMA_HORA_FINAL", "999"))
+    if hora_final_meteograma < 999:
+        filtrados = []
+        for archivo in archivos:
+            m = re.search(r"_f(\\d{3})", archivo.name)
+            if m and int(m.group(1)) <= hora_final_meteograma:
+                filtrados.append(archivo)
+        archivos = filtrados
+        print(f"ℹ Meteograma limitado a f{hora_final_meteograma:03d} por GFS_METEOGRAMA_HORA_FINAL.")
     if not archivos:
         print("❌ No se encontraron archivos GRIB2.")
         sys.exit(1)
