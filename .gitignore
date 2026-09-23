@@ -1,8 +1,14 @@
 target/
 gribs/
+ecmwf/gribs/
 salidas/
+salidas_ecmwf/
+salidas_vigilancia/
+vigilancia_resultado/
 logs/
 loops/
+__pycache__/
+*.pyc
 
 *.grib2
 *.idx
