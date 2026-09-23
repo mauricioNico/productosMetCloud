@@ -68,7 +68,7 @@ jobs:
       - name: Instalar ECMWF y librerías
         run: |
           python -m pip install --upgrade pip
-          pip install ecmwf-opendata numpy pandas matplotlib xarray cfgrib eccodes netCDF4 cartopy scipy
+          pip install ecmwf-opendata numpy pandas matplotlib xarray cfgrib eccodes netCDF4 cartopy
       - name: Descargar ECMWF f000-f096
         run: python python/ecmwf/descargar_ecmwf.py --output ecmwf/gribs
       - name: Generar cartas ECMWF
@@ -144,16 +144,21 @@ jobs:
           pattern: multimodelo-*
           path: descargados
           merge-multiple: false
-      - name: Armar paquetes
+      - name: Instalar RAR
         run: |
-          mkdir -p paquetes
-          [ -d descargados/multimodelo-gfs/salidas ] && zip -r paquetes/productos_gfs.zip descargados/multimodelo-gfs/salidas || true
-          [ -d descargados/multimodelo-ecmwf/salidas_ecmwf ] && zip -r paquetes/cartas_ecmwf.zip descargados/multimodelo-ecmwf/salidas_ecmwf || true
-          [ -d descargados/multimodelo-vigilancia-72h ] && zip -r paquetes/vigilancia_72h.zip descargados/multimodelo-vigilancia-72h || true
-          zip -r paquetes/productos_integrados.zip descargados || true
+          sudo apt-get update -qq
+          sudo apt-get install -y rar
+      - name: Armar único paquete RAR
+        run: |
+          mkdir -p contenido/GFS contenido/ECMWF contenido/Vigilancia paquetes
+          [ -d descargados/multimodelo-gfs ] && cp -a descargados/multimodelo-gfs/. contenido/GFS/ || true
+          [ -d descargados/multimodelo-ecmwf ] && cp -a descargados/multimodelo-ecmwf/. contenido/ECMWF/ || true
+          [ -d descargados/multimodelo-vigilancia-72h ] && cp -a descargados/multimodelo-vigilancia-72h/. contenido/Vigilancia/ || true
+          (cd contenido && rar a -r ../paquetes/productos_multimodelo.rar .)
+          test -s paquetes/productos_multimodelo.rar
       - name: Subir paquete final
         uses: actions/upload-artifact@v4
         with:
           name: productos-multimodelo
-          path: paquetes/
+          path: paquetes/productos_multimodelo.rar
           retention-days: 7

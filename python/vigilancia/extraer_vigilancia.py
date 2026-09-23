@@ -77,7 +77,8 @@ def main():
     ap.add_argument("--output",required=True)
     a=ap.parse_args(); us=units(a.units); rows=[]
     files=sorted(Path(a.input).glob("*.grib2"))
-    if a.model=="ECMWF": files=[p for p in files if "_sfc." in p.name]
+    if a.model=="ECMWF":
+        files=[p for p in files if re.fullmatch(r"ecmwf_\d{8}_\d{2}_f\d{3}\.grib2", p.name)]
     cumulative={}
     for path in files:
         md=metadata(path.name)
