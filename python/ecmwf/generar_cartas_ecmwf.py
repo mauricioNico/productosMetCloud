@@ -15,17 +15,12 @@ def metadata(path):
     return m.group(1), m.group(2), int(m.group(3))
 
 def png_completo(path):
-    if not path.exists() or path.stat().st_size < 1024:
+    if not path.exists() or path.stat().st_size < 10000:
         return False
     try:
         with path.open("rb") as f:
             firma = f.read(8)
-            f.seek(-12, 2)
-            final = f.read(12)
-        return (
-            firma == b"\\x89PNG\\r\\n\\x1a\\n"
-            and final == b"\\x00\\x00\\x00\\x00IEND\\xaeB\\x60\\x82"
-        )
+        return firma == b"\\x89PNG\\r\\n\\x1a\\n"
     except OSError:
         return False
 
