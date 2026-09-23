@@ -7,6 +7,10 @@ on:
       - master
     types: [opened, synchronize, reopened]
 
+concurrency:
+  group: multimodelo-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   gfs:
     runs-on: ubuntu-latest
@@ -35,11 +39,12 @@ jobs:
           BORRAR_GRIBS_AL_FINAL: "false"
           GFS_METEOGRAMA_HORA_FINAL: "84"
         run: java -jar target/generador-cartas-gfs-1.0.0-jar-with-dependencies.jar
-      - name: Extraer datos GFS para vigilancia
+      - name: Reutilizar datos GFS para vigilancia
         run: |
-          GDIR=$(find gribs -mindepth 1 -maxdepth 1 -type d | head -1)
-          test -n "$GDIR"
-          python python/vigilancia/extraer_vigilancia.py --model GFS --input "$GDIR" --output datos_vigilancia_gfs.csv
+          TAFCSV=$(find salidas -type f -name 'datos_taf_*.csv' | head -1)
+          test -n "$TAFCSV"
+          echo "Reutilizando $TAFCSV; no se reabren los 33 GRIB GFS."
+          python python/vigilancia/convertir_datos_taf_gfs.py --input "$TAFCSV" --output datos_vigilancia_gfs.csv
       - name: Limpiar GRIB GFS
         if: always()
         run: rm -rf gribs
