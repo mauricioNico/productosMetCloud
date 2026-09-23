@@ -44,17 +44,35 @@ def retrieve_run(run, outdir):
             )
             tmp_sfc.replace(target)
 
-            for optional in ("10fg", "sf"):
-                extra = outdir / f".extra_{optional}_{step:03d}.grib2"
+            # Ráfagas: algunas horas de ECMWF Open Data exponen 10fg3
+            # en lugar de 10fg. Se prueba primero 10fg y luego 10fg3.
+            gust_ok = False
+            for gust_param in ("10fg", "10fg3"):
+                extra = outdir / f".extra_{gust_param}_{step:03d}.grib2"
                 extras.append(extra)
                 try:
                     client.retrieve(
                         date=date, time=time, step=step, type="fc", stream="oper",
-                        param=optional, target=str(extra)
+                        param=gust_param, target=str(extra)
                     )
                     append_file(target, extra)
-                except Exception as exc:
-                    print(f"WARN {optional} no disponible en f{step:03d}: {exc}")
+                    gust_ok = True
+                    break
+                except Exception:
+                    extra.unlink(missing_ok=True)
+            if not gust_ok:
+                print(f"WARN ráfaga 10fg/10fg3 no disponible en f{step:03d}")
+
+            extra = outdir / f".extra_sf_{step:03d}.grib2"
+            extras.append(extra)
+            try:
+                client.retrieve(
+                    date=date, time=time, step=step, type="fc", stream="oper",
+                    param="sf", target=str(extra)
+                )
+                append_file(target, extra)
+            except Exception as exc:
+                print(f"WARN sf no disponible en f{step:03d}: {exc}")
 
             if step in CARD_STEPS:
                 client.retrieve(
