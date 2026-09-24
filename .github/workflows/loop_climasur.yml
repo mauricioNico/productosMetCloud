@@ -7,14 +7,12 @@ on:
   # ============================================================
   # Se ejecuta cuando termina el workflow principal.
   #
-  # IMPORTANTE:
-  # Cambiar "NOMBRE EXACTO DEL WORKFLOW PRINCIPAL"
-  # por el valor de "name:" del otro workflow.
+  # Se ejecuta cuando termina correctamente el workflow multimodelo.
   # ============================================================
 
   workflow_run:
     workflows:
-       - "Generar productos GFS"
+       - "Generar productos multimodelo"
     types:
       - completed
 

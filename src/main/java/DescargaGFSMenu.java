@@ -24,10 +24,15 @@ public class DescargaGFSMenu {
     private static final String PYTHON_SCRIPT_200 = "python/mapa_200.py";
     private static final String PYTHON_SCRIPT_METEOGRAMA = "python/meteograma_gfs.py";
 
-    // Descargar GRIB desde f000 hasta f084 cada 3 h
+    // Mantiene f084 por defecto para no alterar el workflow productivo.
+    // La corrida multimodelo puede ampliar a f096 con GFS_HORA_FINAL_DESCARGA=96.
     private static final int HORA_INICIAL_DESCARGA = 0;
-    private static final int HORA_FINAL_DESCARGA = 84;
+    private static final int HORA_FINAL_DESCARGA = envInt("GFS_HORA_FINAL_DESCARGA", 84);
     private static final int SALTO_DESCARGA = 3;
+
+    // Por defecto valida disponibilidad con f012, como hasta ahora.
+    // El workflow multimodelo puede exigir f096 para evitar elegir una corrida incompleta.
+    private static final int HORA_PRUEBA_CICLO = envInt("GFS_HORA_PRUEBA_CICLO", 12);
 
     // Cartas solamente para estos horarios
     private static final Set<Integer> HORAS_CARTAS = Set.of(
@@ -40,8 +45,10 @@ public class DescargaGFSMenu {
     private static final double LEFT = -95.0 + 360.0;
     private static final double RIGHT = -25.0 + 360.0;
 
-    // Si querés conservar los GRIB, cambiar a false
-    private static final boolean BORRAR_GRIBS_AL_FINAL = true;
+    // true por defecto para conservar el comportamiento productivo actual.
+    // En la corrida multimodelo se configura false para extraer la vigilancia antes de limpiar.
+    private static final boolean BORRAR_GRIBS_AL_FINAL =
+            Boolean.parseBoolean(System.getenv().getOrDefault("BORRAR_GRIBS_AL_FINAL", "true"));
 
     private static final PuntoMeteograma[] PUNTOS_METEOGRAMA = {
             new PuntoMeteograma("Tandil", -37.3217, -59.1332),
@@ -115,7 +122,7 @@ public class DescargaGFSMenu {
         System.out.println("\n=== CONFIGURACIÓN AUTOMÁTICA ===");
         System.out.println("Fecha detectada: " + fecha);
         System.out.println("Ciclo detectado: " + cicloStr + "Z");
-        System.out.println("Descarga GRIB: f000 a f084 cada 3 h");
+        System.out.println("Descarga GRIB: f000 a f" + String.format("%03d", HORA_FINAL_DESCARGA) + " cada 3 h");
         System.out.println("Cartas: " + HORAS_CARTAS);
         System.out.println("Carpeta cartas: " + carpetaCartas);
         System.out.println("Carpeta meteogramas: " + carpetaMeteogramas);
@@ -288,7 +295,7 @@ public class DescargaGFSMenu {
             try {
                 System.out.println("Probando ciclo " + String.format("%02d", ciclo) + "Z para fecha " + fecha + "...");
 
-                String url = construirURL(fecha, ciclo, 12, top, bottom, left, right);
+                String url = construirURL(fecha, ciclo, HORA_PRUEBA_CICLO, top, bottom, left, right);
 
                 if (urlDisponible(url)) {
                     System.out.println("✔ Ciclo disponible detectado: " + String.format("%02d", ciclo) + "Z");
@@ -638,6 +645,20 @@ public class DescargaGFSMenu {
             }
         } catch (IOException e) {
             System.out.println("⚠ No se pudo borrar la carpeta vacía: " + carpeta);
+        }
+    }
+
+    private static int envInt(String nombre, int valorPorDefecto) {
+        String valor = System.getenv(nombre);
+        if (valor == null || valor.isBlank()) {
+            return valorPorDefecto;
+        }
+        try {
+            return Integer.parseInt(valor.trim());
+        } catch (NumberFormatException e) {
+            System.out.println("⚠ Valor inválido para " + nombre + "='" + valor
+                    + "'. Se usará " + valorPorDefecto + ".");
+            return valorPorDefecto;
         }
     }
 

@@ -1,0 +1,16 @@
+nombre;lat;lon;region_lluvia;region_viento;region_nieve;zonda_aplicable;activo
+Tandil;-37.3217;-59.1332;PP_R8;WIND_R2;REVISAR;false;true
+Mar_del_Plata;-38.0055;-57.5426;PP_R8;WIND_R2;REVISAR;false;true
+El_Palomar;-34.6099;-58.5986;PP_R8;WIND_R2;REVISAR;false;true
+Parana;-31.7319;-60.5238;PP_R8;WIND_R2;REVISAR;false;true
+Escuela_de_Aviacion_Militar;-31.3236;-64.2080;PP_R5;WIND_R2;REVISAR;false;true
+Gordillo;-29.4260;-66.8500;PP_R3;WIND_R1;SNOW_R1;true;true
+Tartagal;-22.5164;-63.8013;PP_R3;WIND_R1;REVISAR;false;true
+Rio_Cuarto;-33.1307;-64.3499;PP_R5;WIND_R2;REVISAR;false;true
+Reconquista;-29.1440;-59.6500;PP_R7;WIND_R2;REVISAR;false;true
+Resistencia;-27.4514;-58.9867;PP_R7;WIND_R2;REVISAR;false;true
+Mendoza;-32.8895;-68.8458;PP_R5;WIND_R1;SNOW_R1;true;true
+Villa_Reynolds;-33.7299;-65.3874;PP_R5;WIND_R2;REVISAR;false;true
+Comodoro_Rivadavia;-45.8641;-67.4966;PP_R4;WIND_R3;SNOW_R3;false;true
+Rio_Gallegos;-51.6230;-69.2168;PP_R4;WIND_R3;SNOW_R3;false;true
+Marambio;-64.1400;-56.4000;UNDEFINED;UNDEFINED;UNDEFINED;false;true

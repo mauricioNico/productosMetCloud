@@ -1,7 +1,8 @@
 #!/usr/bin/env python
 import sys
-from pathlib import Path
+import os
 import re
+from pathlib import Path
 import logging
 
 import numpy as np
@@ -396,6 +397,10 @@ def exportar_datos_taf(df, nombre_punto, archivo_csv):
         "reflectivity_dbz",
         "low_cloud_pct",
         "ceiling_ft_agl",
+        "run_time",
+        "lead_h",
+        "snow_mm",
+        "snow_depth_cm",
     ]
 
     salida = pd.DataFrame({
@@ -415,6 +420,10 @@ def exportar_datos_taf(df, nombre_punto, archivo_csv):
         "reflectivity_dbz": df["refc"],
         "low_cloud_pct": df["lcdc"],
         "ceiling_ft_agl": df["ceiling_ft_agl"],
+        "run_time": pd.to_datetime(df["run_time"]).dt.strftime("%Y-%m-%dT%H:%M"),
+        "lead_h": df["lead_h"],
+        "snow_mm": df["snow_intervalo"],
+        "snow_depth_cm": df["snow_depth_cm"],
     })
 
     salida = salida[columnas]
@@ -684,6 +693,12 @@ def main():
     carpeta_salidas.mkdir(parents=True, exist_ok=True)
 
     archivos = sorted(carpeta_gribs.glob("*.grib2"))
+    hora_final_meteograma = int(os.getenv("GFS_METEOGRAMA_HORA_FINAL", "999"))
+    if hora_final_meteograma < 999:
+        print(
+            f"ℹ Se procesarán todos los GRIB disponibles para datos de vigilancia; "
+            f"el gráfico del meteograma se limitará a f{hora_final_meteograma:03d}."
+        )
     if not archivos:
         print("❌ No se encontraron archivos GRIB2.")
         sys.exit(1)
@@ -707,6 +722,9 @@ def main():
     v10_list = []
     gust10_kt_list = []
     tp_acum_list = []
+    snow_we_acum_list = []
+    snow_depth_cm_list = []
+    lead_h_list = []
 
     # Variables adicionales para TAF
     vis_list = []
@@ -748,6 +766,22 @@ def main():
         ])
 
         ds_tp = abrir_por_shortname(archivo, "tp")
+
+        # Nieve: equivalente de agua acumulado y profundidad, si están disponibles.
+        # Se extraen en la misma pasada del meteograma para evitar reabrir todos
+        # los GRIB en un segundo proceso de vigilancia.
+        ds_snow_we = abrir_con_filtros_posibles(archivo, [
+            {"shortName": "sdwe", "typeOfLevel": "surface"},
+            {"shortName": "weasd", "typeOfLevel": "surface"},
+            {"shortName": "sdwe"},
+            {"shortName": "weasd"}
+        ])
+        ds_snow_depth = abrir_con_filtros_posibles(archivo, [
+            {"shortName": "sde", "typeOfLevel": "surface"},
+            {"shortName": "sd", "typeOfLevel": "surface"},
+            {"shortName": "sde"},
+            {"shortName": "sd"}
+        ])
 
         # Visibilidad de superficie
         ds_vis = abrir_con_filtros_posibles(archivo, [
@@ -879,6 +913,13 @@ def main():
         da_tp = extraer_dataarray_punto(ds_tp, lat, lon)
         tp = normalizar_precip_mm_desde_da(da_tp)
 
+        da_snow_we = extraer_dataarray_punto(ds_snow_we, lat, lon)
+        snow_we = normalizar_precip_mm_desde_da(da_snow_we)
+
+        da_snow_depth = extraer_dataarray_punto(ds_snow_depth, lat, lon)
+        snow_depth_m = normalizar_altura_m_desde_da(da_snow_depth)
+        snow_depth_cm = snow_depth_m * 100.0 if np.isfinite(snow_depth_m) else np.nan
+
         vis_m = extraer_escalar_desde_ds(ds_vis, lat, lon)
 
         da_acpcp = extraer_dataarray_punto(ds_acpcp, lat, lon)
@@ -944,6 +985,11 @@ def main():
         v10_list.append(v10)
         gust10_kt_list.append(gust10_kt)
         tp_acum_list.append(tp)
+        snow_we_acum_list.append(snow_we)
+        snow_depth_cm_list.append(snow_depth_cm)
+
+        match_lead = re.search(r"_f(\d{3})", archivo.name)
+        lead_h_list.append(int(match_lead.group(1)) if match_lead else np.nan)
 
         vis_list.append(vis_m)
         acpcp_acum_list.append(acpcp)
@@ -975,6 +1021,9 @@ def main():
         "v10": v10_list,
         "gust10_kt": gust10_kt_list,
         "tp_acum": tp_acum_list,
+        "snow_we_acum": snow_we_acum_list,
+        "snow_depth_cm": snow_depth_cm_list,
+        "lead_h": lead_h_list,
         "vis_m": vis_list,
         "acpcp_acum": acpcp_acum_list,
         "cin": cin_list,
@@ -1005,9 +1054,11 @@ def main():
     df["wind_dir"] = calcular_direccion_viento(df["u10"].values, df["v10"].values)
 
     df["tp_intervalo"] = calcular_precipitacion_intervalo(df["tp_acum"].values)
+    df["snow_intervalo"] = calcular_precipitacion_intervalo(df["snow_we_acum"].values)
     df["acpcp_intervalo"] = calcular_precipitacion_intervalo(
         df["acpcp_acum"].values
     )
+    df["run_time"] = df["tiempo"] - pd.to_timedelta(df["lead_h"], unit="h")
 
     # El HGT de cloud ceiling es altura geopotencial MSL. Para TAF necesitamos AGL.
     df["ceiling_ft_agl"] = np.where(
@@ -1019,6 +1070,16 @@ def main():
     # Exportar antes del gráfico: si faltara alguna variable opcional, se escribe
     # como campo vacío sin impedir la generación del meteograma.
     exportar_datos_taf(df, nombre_punto, archivo_datos_taf)
+
+    if hora_final_meteograma < 999 and "lead_h" in df.columns:
+        mascara_plot = pd.to_numeric(df["lead_h"], errors="coerce") <= hora_final_meteograma
+        indices_plot = np.flatnonzero(mascara_plot.to_numpy())
+        if len(indices_plot) > 0:
+            df = df.loc[mascara_plot].reset_index(drop=True)
+            perfiles_t = perfiles_t[indices_plot]
+            perfiles_rh = perfiles_rh[indices_plot]
+            perfiles_u = perfiles_u[indices_plot]
+            perfiles_v = perfiles_v[indices_plot]
 
     if not np.isfinite(df["gust10_kt"]).any():
         print(

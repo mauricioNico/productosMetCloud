@@ -1,0 +1,169 @@
+name: Generar productos multimodelo
+
+on:
+  workflow_dispatch:
+
+  schedule:
+    - cron: "0 4 * * *"   # 04 UTC
+    - cron: "0 18 * * *"  # 18 UTC
+
+  pull_request:
+    branches:
+      - master
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: multimodelo-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gfs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Instalar librerías meteorológicas
+        run: |
+          python -m pip install --upgrade pip
+          pip install numpy pandas matplotlib xarray cfgrib eccodes netCDF4 metpy cartopy
+      - name: Compilar GFS
+        run: mvn clean package
+      - name: Generar soundings GFS
+        run: mvn exec:java -Dexec.mainClass=GenerarSoundingsAutomaticoGFS
+      - name: Ejecutar GFS hasta f096
+        env:
+          GFS_HORA_FINAL_DESCARGA: "96"
+          GFS_HORA_PRUEBA_CICLO: "96"
+          BORRAR_GRIBS_AL_FINAL: "false"
+          GFS_METEOGRAMA_HORA_FINAL: "84"
+        run: java -jar target/generador-cartas-gfs-1.0.0-jar-with-dependencies.jar
+      - name: Reutilizar datos GFS para vigilancia
+        run: |
+          TAFCSV=$(find salidas -type f -name 'datos_taf_*.csv' | head -1)
+          test -n "$TAFCSV"
+          echo "Reutilizando $TAFCSV; no se reabren los 33 GRIB GFS."
+          python python/vigilancia/convertir_datos_taf_gfs.py --input "$TAFCSV" --output datos_vigilancia_gfs.csv
+      - name: Limpiar GRIB GFS
+        if: always()
+        run: rm -rf gribs
+      - name: Subir GFS intermedio
+        uses: actions/upload-artifact@v4
+        with:
+          name: multimodelo-gfs
+          path: |
+            salidas/
+            datos_vigilancia_gfs.csv
+          retention-days: 3
+
+  ecmwf:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Instalar ECMWF y librerías
+        run: |
+          python -m pip install --upgrade pip
+          pip install ecmwf-opendata numpy pandas matplotlib xarray cfgrib eccodes netCDF4 cartopy
+      - name: Descargar ECMWF f000-f096
+        run: python python/ecmwf/descargar_ecmwf.py --output ecmwf/gribs
+      - name: Generar cartas ECMWF
+        run: python python/ecmwf/generar_cartas_ecmwf.py --input ecmwf/gribs --output salidas_ecmwf
+      - name: Extraer datos ECMWF para vigilancia
+        run: python python/vigilancia/extraer_vigilancia.py --model ECMWF --input ecmwf/gribs --output datos_vigilancia_ecmwf.csv
+      - name: Limpiar GRIB ECMWF
+        if: always()
+        run: rm -rf ecmwf/gribs
+      - name: Subir ECMWF intermedio
+        uses: actions/upload-artifact@v4
+        with:
+          name: multimodelo-ecmwf
+          path: |
+            salidas_ecmwf/
+            datos_vigilancia_ecmwf.csv
+          retention-days: 3
+
+  vigilancia:
+    needs: [gfs, ecmwf]
+    if: ${{ always() && (needs.gfs.result == 'success' || needs.ecmwf.result == 'success') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - name: Descargar GFS si existe
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: multimodelo-gfs
+          path: entrada/gfs
+      - name: Descargar ECMWF si existe
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: multimodelo-ecmwf
+          path: entrada/ecmwf
+      - name: Compilar y probar vigilancia Java
+        run: mvn -f vigilancia/pom.xml clean test package
+      - name: Ejecutar vigilancia 72 h
+        run: |
+          GFS=""
+          ECMWF=""
+          test -f entrada/gfs/datos_vigilancia_gfs.csv && GFS="entrada/gfs/datos_vigilancia_gfs.csv"
+          test -f entrada/ecmwf/datos_vigilancia_ecmwf.csv && ECMWF="entrada/ecmwf/datos_vigilancia_ecmwf.csv"
+          if [ -z "$GFS" ] && [ -z "$ECMWF" ]; then
+            echo "No hay ningún modelo disponible para vigilancia" >&2
+            exit 1
+          fi
+          ARGS=(--units vigilancia/config/unidades.csv --thresholds vigilancia/config/umbrales.csv --horizon 72 --output vigilancia_resultado)
+          [ -n "$GFS" ] && ARGS+=(--gfs "$GFS")
+          [ -n "$ECMWF" ] && ARGS+=(--ecmwf "$ECMWF")
+          java -jar vigilancia/target/vigilancia-faa-1.0.0.jar "${ARGS[@]}"
+      - name: Subir vigilancia si hubo eventos
+        if: ${{ hashFiles('vigilancia_resultado/**') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: multimodelo-vigilancia-72h
+          path: vigilancia_resultado/
+          retention-days: 7
+
+  paquete_final:
+    needs: [gfs, ecmwf, vigilancia]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar artifacts disponibles
+        uses: actions/download-artifact@v4
+        with:
+          pattern: multimodelo-*
+          path: descargados
+          merge-multiple: false
+      - name: Instalar RAR
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y rar
+      - name: Armar único paquete RAR
+        run: |
+          mkdir -p contenido/GFS contenido/ECMWF contenido/Vigilancia paquetes
+          [ -d descargados/multimodelo-gfs ] && cp -a descargados/multimodelo-gfs/. contenido/GFS/ || true
+          [ -d descargados/multimodelo-ecmwf ] && cp -a descargados/multimodelo-ecmwf/. contenido/ECMWF/ || true
+          [ -d descargados/multimodelo-vigilancia-72h ] && cp -a descargados/multimodelo-vigilancia-72h/. contenido/Vigilancia/ || true
+          (cd contenido && rar a -r ../paquetes/productos_multimodelo.rar .)
+          test -s paquetes/productos_multimodelo.rar
+      - name: Subir paquete final
+        uses: actions/upload-artifact@v4
+        with:
+          name: productos-multimodelo
+          path: paquetes/productos_multimodelo.rar
+          retention-days: 7
