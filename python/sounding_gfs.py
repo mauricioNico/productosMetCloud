@@ -544,7 +544,7 @@ def dibujar_panel_indices(skew, indices):
         ("MLCAPE", fmt_indice(indices["MLCAPE"], 0, " J/kg"), categoria_color("MLCAPE", indices["MLCAPE"])),
         ("MUCAPE", fmt_indice(indices["MUCAPE"], 0, " J/kg"), categoria_color("MUCAPE", indices["MUCAPE"])),
         ("MUCIN", fmt_indice(indices["MUCIN"], 0, " J/kg"), "black"),
-        ("MU", f'{fmt_indice(indices["MU_P"], 0, " hPa")}  {fmt_indice(indices["MU_T"], 0, "°C")}/{fmt_indice(indices["MU_TD"], 0, "°C")}', "black"),
+        ("MU", f'{fmt_indice(indices["MU_P"], 0, "hPa")} T/Td {fmt_indice(indices["MU_T"], 0, "°")}/{fmt_indice(indices["MU_TD"], 0, "°")}', "black"),
         ("Tc", fmt_indice(indices["TC"], 1, " °C"), "black"),
         ("LI", fmt_indice(indices["LI"], 1, ""), categoria_color("LI", indices["LI"])),
         ("K", fmt_indice(indices["K"], 1, ""), categoria_color("K", indices["K"])),
@@ -553,19 +553,19 @@ def dibujar_panel_indices(skew, indices):
         ("PWAT", fmt_indice(indices["PWAT"], 1, " mm"), "black"),
     ]
 
-    x0, y0, dy = 0.02, 0.035, 0.023
+    x0, y0, dy = 0.018, 0.032, 0.023
     skew.ax.text(
         x0 - 0.008, y0 - 0.010,
-        "\n".join([" " * 31] * (len(filas) + 1)),
+        "\n".join([" " * 39] * (len(filas) + 1)),
         transform=skew.ax.transAxes,
-        fontsize=8.5, va="bottom", ha="left",
+        fontsize=8.0, va="bottom", ha="left",
         bbox=dict(boxstyle="round", facecolor="white", alpha=0.88, edgecolor="gray")
     )
     for i, (nom, val, color) in enumerate(filas):
         skew.ax.text(
             x0, y0 + i * dy, f"{nom}: {val}",
             transform=skew.ax.transAxes,
-            fontsize=8.3, va="bottom", ha="left",
+            fontsize=7.8, va="bottom", ha="left",
             color=color, fontweight="bold" if color != "black" else "normal",
             zorder=8
         )
@@ -803,21 +803,31 @@ def generar_sounding(archivo, carpeta_salidas, lat, lon, nombre_punto):
     except Exception:
         pass
 
-    titulo = f"Sondeo: {nombre_punto}"
-    subtitulo = f"Lat {lat:.2f} | Lon {lon:.2f}"
-
+    # Encabezado compacto: evita superposición con nombres de localidad largos.
+    titulo = nombre_punto.replace("_", " ")
+    meta = f"{lat:.2f}, {lon:.2f}"
     if fecha and ciclo and fff:
-        subtitulo += f" | Corrida {fecha} {ciclo}Z | f{fff}"
-
+        meta += f" | {fecha} {ciclo}Z f{fff}"
     if valid_time is not None:
-        subtitulo += f" | Válido {pd.to_datetime(valid_time).strftime('%d/%m/%Y %HZ')}"
+        meta += f" | Vál. {pd.to_datetime(valid_time).strftime('%d/%m %HZ')}"
 
-    skew.ax.set_title(titulo, loc="left", fontsize=14, fontweight="bold")
-    skew.ax.set_title(subtitulo, loc="right", fontsize=9)
+    skew.ax.set_title(titulo, loc="left", fontsize=12, fontweight="bold", pad=8)
+    skew.ax.text(
+        0.99, 1.012, meta,
+        transform=skew.ax.transAxes,
+        fontsize=8, ha="right", va="bottom",
+        clip_on=False
+    )
 
     dibujar_panel_indices(skew, indices)
 
-    skew.ax.legend(loc="upper right", fontsize=9)
+    # La leyenda se coloca fuera del margen derecho, para no tapar las barbas.
+    skew.ax.legend(
+        loc="upper left",
+        bbox_to_anchor=(1.01, 0.88),
+        fontsize=8,
+        borderaxespad=0.0
+    )
 
     nombre_limpio = re.sub(r"[^A-Za-z0-9_\-]", "_", nombre_punto)
     fff_salida = fff if fff else f"{obtener_hora_pronostico_desde_nombre(archivo.name) or 0:03d}"
