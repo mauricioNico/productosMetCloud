@@ -149,21 +149,16 @@ jobs:
           pattern: multimodelo-*
           path: descargados
           merge-multiple: false
-      - name: Instalar RAR
+      - name: Armar contenido final sin doble compresión
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y rar
-      - name: Armar único paquete RAR
-        run: |
-          mkdir -p contenido/GFS contenido/ECMWF contenido/Vigilancia paquetes
-          [ -d descargados/multimodelo-gfs ] && cp -a descargados/multimodelo-gfs/. contenido/GFS/ || true
-          [ -d descargados/multimodelo-ecmwf ] && cp -a descargados/multimodelo-ecmwf/. contenido/ECMWF/ || true
-          [ -d descargados/multimodelo-vigilancia-72h ] && cp -a descargados/multimodelo-vigilancia-72h/. contenido/Vigilancia/ || true
-          (cd contenido && rar a -r ../paquetes/productos_multimodelo.rar .)
-          test -s paquetes/productos_multimodelo.rar
-      - name: Subir paquete final
+          mkdir -p paquete_final/GFS paquete_final/ECMWF paquete_final/Vigilancia
+          [ -d descargados/multimodelo-gfs ] && cp -a descargados/multimodelo-gfs/. paquete_final/GFS/ || true
+          [ -d descargados/multimodelo-ecmwf ] && cp -a descargados/multimodelo-ecmwf/. paquete_final/ECMWF/ || true
+          [ -d descargados/multimodelo-vigilancia-72h ] && cp -a descargados/multimodelo-vigilancia-72h/. paquete_final/Vigilancia/ || true
+          test -n "$(find paquete_final -type f -print -quit)"
+      - name: Subir único paquete final
         uses: actions/upload-artifact@v4
         with:
           name: productos-multimodelo
-          path: paquetes/productos_multimodelo.rar
+          path: paquete_final/
           retention-days: 7

@@ -33,6 +33,7 @@ logging.getLogger("cfgrib").setLevel(logging.ERROR)
 logging.getLogger("eccodes").setLevel(logging.ERROR)
 
 NIVEL_TOPE_HPA = 150.0
+NIVEL_TOPE_BARBAS_HPA = 175.0
 
 NIVELES_VIENTO_SIGNIFICATIVOS = np.array(
     [1000, 850, 700, 500, 400, 300, 250, 200, 150],
@@ -321,67 +322,148 @@ def preparar_perfiles(archivo, lat, lon):
     return p, T, Td, U, V, ds_t
 
 
-def calcular_indices(p, T, Td):
+def _valor_en_presion(p, campo, nivel_hpa):
+    """Interpola un campo isobárico al nivel solicitado."""
+    p_asc = np.asarray(p.magnitude, dtype=float)[::-1]
+    y_asc = np.asarray(campo.magnitude, dtype=float)[::-1]
+    return np.interp(float(nivel_hpa), p_asc, y_asc)
+
+
+def calcular_sweat(p, T, Td, U, V, tt):
+    """Calcula el SWEAT clásico usando 850 y 500 hPa."""
+    try:
+        if not np.isfinite(tt):
+            return np.nan
+        pmin = np.nanmin(p.magnitude)
+        pmax = np.nanmax(p.magnitude)
+        if pmin > 500 or pmax < 850:
+            return np.nan
+
+        td850 = _valor_en_presion(p, Td.to("degC"), 850.0)
+        u850 = _valor_en_presion(p, U.to("kt"), 850.0)
+        v850 = _valor_en_presion(p, V.to("kt"), 850.0)
+        u500 = _valor_en_presion(p, U.to("kt"), 500.0)
+        v500 = _valor_en_presion(p, V.to("kt"), 500.0)
+
+        spd850 = np.hypot(u850, v850)
+        spd500 = np.hypot(u500, v500)
+        dir850 = (np.degrees(np.arctan2(-u850, -v850)) + 360.0) % 360.0
+        dir500 = (np.degrees(np.arctan2(-u500, -v500)) + 360.0) % 360.0
+
+        term_td = 12.0 * max(td850, 0.0)
+        term_tt = 20.0 * max(tt - 49.0, 0.0)
+        term_wind = 2.0 * spd850 + spd500
+
+        shear_term = 0.0
+        delta = (dir500 - dir850) % 360.0
+        if (130.0 <= dir850 <= 250.0 and
+                210.0 <= dir500 <= 310.0 and
+                delta > 0.0 and
+                spd850 >= 15.0 and
+                spd500 >= 15.0):
+            shear_term = 125.0 * (np.sin(np.radians(delta)) + 0.2)
+
+        return float(term_td + term_tt + term_wind + shear_term)
+    except Exception as e:
+        print(f"⚠ No se pudo calcular SWEAT: {e}")
+        return np.nan
+
+
+def calcular_temperatura_convectiva(p, T, Td):
+    """Temperatura convectiva aproximada a partir del CCL."""
+    try:
+        ccl_p, ccl_t, conv_t = mpcalc.ccl(p, T, Td)
+        return float(conv_t.to("degC").magnitude)
+    except Exception as e:
+        print(f"⚠ No se pudo calcular temperatura convectiva: {e}")
+        return np.nan
+
+
+def calcular_indices(p, T, Td, U, V):
     indices = {
         "LCL": np.nan,
-        "CAPE": np.nan,
-        "CIN": np.nan,
+        "SBCAPE": np.nan,
+        "SBCIN": np.nan,
+        "MLCAPE": np.nan,
+        "MLCIN": np.nan,
+        "MUCAPE": np.nan,
+        "MUCIN": np.nan,
+        "MU_P": np.nan,
+        "MU_T": np.nan,
+        "MU_TD": np.nan,
         "LI": np.nan,
         "K": np.nan,
         "TT": np.nan,
+        "SWEAT": np.nan,
         "PWAT": np.nan,
-        "parcel_profile": None
+        "TC": np.nan,
+        "parcel_profile_sfc": None,
+        "parcel_profile_mu": None
     }
 
     if len(p) < 3:
         return indices
 
     try:
-        lcl_p, lcl_t = mpcalc.lcl(p[0], T[0], Td[0])
+        lcl_p, _ = mpcalc.lcl(p[0], T[0], Td[0])
         indices["LCL"] = float(lcl_p.to("hPa").magnitude)
     except Exception as e:
         print(f"⚠ No se pudo calcular LCL: {e}")
 
     try:
         prof = mpcalc.parcel_profile(p, T[0], Td[0])
-        indices["parcel_profile"] = prof
+        indices["parcel_profile_sfc"] = prof
+        cape, cin = mpcalc.cape_cin(p, T, Td, prof)
+        indices["SBCAPE"] = float(cape.to("J/kg").magnitude)
+        indices["SBCIN"] = float(cin.to("J/kg").magnitude)
+
+        pres_asc = p.magnitude[::-1]
+        temp_asc = T.to("degC").magnitude[::-1]
+        prof_asc = prof.to("degC").magnitude[::-1]
+        if np.nanmin(p.magnitude) <= 500.0 <= np.nanmax(p.magnitude):
+            t500 = np.interp(500.0, pres_asc, temp_asc)
+            parcel500 = np.interp(500.0, pres_asc, prof_asc)
+            indices["LI"] = float(t500 - parcel500)
     except Exception as e:
-        print(f"⚠ No se pudo calcular perfil de parcela: {e}")
-        prof = None
+        print(f"⚠ No se pudo calcular parcela superficial/CAPE/LI: {e}")
 
-    if prof is not None:
-        try:
-            cape, cin = mpcalc.cape_cin(p, T, Td, prof)
-            indices["CAPE"] = float(cape.to("J/kg").magnitude)
-            indices["CIN"] = float(cin.to("J/kg").magnitude)
-        except Exception as e:
-            print(f"⚠ No se pudo calcular CAPE/CIN: {e}")
+    try:
+        mlcape, mlcin = mpcalc.mixed_layer_cape_cin(p, T, Td, depth=100 * units.hPa)
+        indices["MLCAPE"] = float(mlcape.to("J/kg").magnitude)
+        indices["MLCIN"] = float(mlcin.to("J/kg").magnitude)
+    except Exception as e:
+        print(f"⚠ No se pudo calcular MLCAPE/MLCIN: {e}")
 
-        try:
-            pres_asc = p.magnitude[::-1]
-            temp_asc = T.to("degC").magnitude[::-1]
-            prof_asc = prof.to("degC").magnitude[::-1]
+    try:
+        mu_p, mu_t, mu_td, mu_idx = mpcalc.most_unstable_parcel(
+            p, T, Td, depth=300 * units.hPa
+        )
+        indices["MU_P"] = float(mu_p.to("hPa").magnitude)
+        indices["MU_T"] = float(mu_t.to("degC").magnitude)
+        indices["MU_TD"] = float(mu_td.to("degC").magnitude)
 
-            if np.nanmin(p.magnitude) <= 500.0 <= np.nanmax(p.magnitude):
-                t500 = np.interp(500.0, pres_asc, temp_asc)
-                parcel500 = np.interp(500.0, pres_asc, prof_asc)
-                indices["LI"] = float(t500 - parcel500)
-        except Exception as e:
-            print(f"⚠ No se pudo calcular LI: {e}")
+        mucape, mucin = mpcalc.most_unstable_cape_cin(
+            p, T, Td, depth=300 * units.hPa
+        )
+        indices["MUCAPE"] = float(mucape.to("J/kg").magnitude)
+        indices["MUCIN"] = float(mucin.to("J/kg").magnitude)
 
-    # K Index necesita niveles clásicos como 850/700/500 hPa.
+        mu_profile = mpcalc.parcel_profile(p[mu_idx:], mu_t, mu_td)
+        full_mu = np.full(len(p), np.nan) * units.degC
+        full_mu[mu_idx:] = mu_profile.to("degC")
+        indices["parcel_profile_mu"] = full_mu
+    except Exception as e:
+        print(f"⚠ No se pudo calcular parcela MU/MUCAPE: {e}")
+
     try:
         if np.nanmin(p.magnitude) <= 500 and np.nanmax(p.magnitude) >= 850:
             indices["K"] = float(mpcalc.k_index(p, T, Td).magnitude)
-    except Exception as e:
-        print(f"⚠ No se pudo calcular K Index: {e}")
-
-    # Total Totals también depende de 850 y 500 hPa.
-    try:
-        if np.nanmin(p.magnitude) <= 500 and np.nanmax(p.magnitude) >= 850:
             indices["TT"] = float(mpcalc.total_totals_index(p, T, Td).magnitude)
     except Exception as e:
-        print(f"⚠ No se pudo calcular Total Totals: {e}")
+        print(f"⚠ No se pudo calcular K/TT: {e}")
+
+    indices["SWEAT"] = calcular_sweat(p, T, Td, U, V, indices["TT"])
+    indices["TC"] = calcular_temperatura_convectiva(p, T, Td)
 
     try:
         pw = mpcalc.precipitable_water(p, Td)
@@ -391,6 +473,102 @@ def calcular_indices(p, T, Td):
 
     return indices
 
+
+def categoria_color(nombre, valor):
+    """Devuelve color de lectura rápida según umbrales operativos/clásicos."""
+    if not np.isfinite(valor):
+        return "black"
+
+    if nombre == "LI":
+        if valor <= -8:
+            return "darkred"
+        if valor <= -4:
+            return "red"
+        if valor <= -1:
+            return "darkorange"
+        return "steelblue"
+
+    if nombre == "K":
+        if valor >= 36:
+            return "darkred"
+        if valor >= 31:
+            return "red"
+        if valor >= 26:
+            return "darkorange"
+        if valor >= 21:
+            return "goldenrod"
+        return "steelblue"
+
+    if nombre == "TT":
+        if valor >= 56:
+            return "darkred"
+        if valor >= 50:
+            return "red"
+        if valor >= 48:
+            return "darkorange"
+        if valor >= 44:
+            return "goldenrod"
+        return "steelblue"
+
+    if nombre in ("SBCAPE", "MLCAPE", "MUCAPE"):
+        if valor >= 4000:
+            return "darkred"
+        if valor >= 2500:
+            return "red"
+        if valor >= 1000:
+            return "darkorange"
+        if valor > 0:
+            return "goldenrod"
+        return "steelblue"
+
+    if nombre == "SWEAT":
+        if valor >= 400:
+            return "darkred"
+        if valor >= 300:
+            return "red"
+        if valor >= 250:
+            return "darkorange"
+        if valor >= 150:
+            return "goldenrod"
+        return "steelblue"
+
+    return "black"
+
+
+def dibujar_panel_indices(skew, indices):
+    """Panel coloreado con índices termodinámicos/dinámicos."""
+    filas = [
+        ("LCL", fmt_lcl_pies(indices["LCL"]), "black"),
+        ("SBCAPE", fmt_indice(indices["SBCAPE"], 0, " J/kg"), categoria_color("SBCAPE", indices["SBCAPE"])),
+        ("SBCIN", fmt_indice(indices["SBCIN"], 0, " J/kg"), "black"),
+        ("MLCAPE", fmt_indice(indices["MLCAPE"], 0, " J/kg"), categoria_color("MLCAPE", indices["MLCAPE"])),
+        ("MUCAPE", fmt_indice(indices["MUCAPE"], 0, " J/kg"), categoria_color("MUCAPE", indices["MUCAPE"])),
+        ("MUCIN", fmt_indice(indices["MUCIN"], 0, " J/kg"), "black"),
+        ("MU", f'{fmt_indice(indices["MU_P"], 0, "hPa")} T/Td {fmt_indice(indices["MU_T"], 0, "°")}/{fmt_indice(indices["MU_TD"], 0, "°")}', "black"),
+        ("Tc", fmt_indice(indices["TC"], 1, " °C"), "black"),
+        ("LI", fmt_indice(indices["LI"], 1, ""), categoria_color("LI", indices["LI"])),
+        ("K", fmt_indice(indices["K"], 1, ""), categoria_color("K", indices["K"])),
+        ("TT", fmt_indice(indices["TT"], 1, ""), categoria_color("TT", indices["TT"])),
+        ("SWEAT", fmt_indice(indices["SWEAT"], 0, ""), categoria_color("SWEAT", indices["SWEAT"])),
+        ("PWAT", fmt_indice(indices["PWAT"], 1, " mm"), "black"),
+    ]
+
+    x0, y0, dy = 0.018, 0.032, 0.023
+    skew.ax.text(
+        x0 - 0.008, y0 - 0.010,
+        "\n".join([" " * 39] * (len(filas) + 1)),
+        transform=skew.ax.transAxes,
+        fontsize=8.0, va="bottom", ha="left",
+        bbox=dict(boxstyle="round", facecolor="white", alpha=0.88, edgecolor="gray")
+    )
+    for i, (nom, val, color) in enumerate(filas):
+        skew.ax.text(
+            x0, y0 + i * dy, f"{nom}: {val}",
+            transform=skew.ax.transAxes,
+            fontsize=7.8, va="bottom", ha="left",
+            color=color, fontweight="bold" if color != "black" else "normal",
+            zorder=8
+        )
 
 def fmt_indice(valor, decimales=0, unidad=""):
     if not np.isfinite(valor):
@@ -542,6 +720,8 @@ def graficar_barbas_niveles_significativos(skew, p, U, V):
         v_sel = []
 
         for nivel in NIVELES_VIENTO_SIGNIFICATIVOS:
+            if nivel < NIVEL_TOPE_BARBAS_HPA:
+                continue
             if len(p_hpa) == 0:
                 continue
 
@@ -581,7 +761,7 @@ def generar_sounding(archivo, carpeta_salidas, lat, lon, nombre_punto):
     # innecesarios y para mantener una escala más útil en el análisis operativo.
     p, T, Td, U, V = filtrar_perfil_hasta_150_hpa(p, T, Td, U, V)
 
-    indices = calcular_indices(p, T, Td)
+    indices = calcular_indices(p, T, Td, U, V)
 
     fecha, ciclo, fff = obtener_ciclo_desde_nombre(archivo.name)
     valid_time = obtener_datetime_valido(ds_t)
@@ -595,11 +775,17 @@ def generar_sounding(archivo, carpeta_salidas, lat, lon, nombre_punto):
     # Temperatura y altura aproximada cada 50 hPa desde 500 hPa hacia arriba.
     anotar_temperatura_y_altura_desde_500(skew, p, T)
 
-    if indices["parcel_profile"] is not None:
+    if indices["parcel_profile_sfc"] is not None:
         try:
-            skew.plot(p, indices["parcel_profile"], "black", linewidth=1.4, linestyle="--", label="Parcela")
+            skew.plot(p, indices["parcel_profile_sfc"], "black", linewidth=1.3, linestyle="--", label="Parcela SFC")
         except Exception as e:
-            print(f"⚠ No se pudo graficar la parcela: {e}")
+            print(f"⚠ No se pudo graficar la parcela SFC: {e}")
+
+    if indices["parcel_profile_mu"] is not None:
+        try:
+            skew.plot(p, indices["parcel_profile_mu"], color="purple", linewidth=1.5, linestyle="-.", label=f"Parcela MU ({indices['MU_P']:.0f} hPa)")
+        except Exception as e:
+            print(f"⚠ No se pudo graficar la parcela MU: {e}")
 
     # Viento en niveles significativos.
     graficar_barbas_niveles_significativos(skew, p, U, V)
@@ -617,40 +803,31 @@ def generar_sounding(archivo, carpeta_salidas, lat, lon, nombre_punto):
     except Exception:
         pass
 
-    titulo = f"Sondeo: {nombre_punto}"
-    subtitulo = f"Lat {lat:.2f} | Lon {lon:.2f}"
-
+    # Encabezado compacto: evita superposición con nombres de localidad largos.
+    titulo = nombre_punto.replace("_", " ")
+    meta = f"{lat:.2f}, {lon:.2f}"
     if fecha and ciclo and fff:
-        subtitulo += f" | Corrida {fecha} {ciclo}Z | f{fff}"
-
+        meta += f" | {fecha} {ciclo}Z f{fff}"
     if valid_time is not None:
-        subtitulo += f" | Válido {pd.to_datetime(valid_time).strftime('%d/%m/%Y %HZ')}"
+        meta += f" | Vál. {pd.to_datetime(valid_time).strftime('%d/%m %HZ')}"
 
-    skew.ax.set_title(titulo, loc="left", fontsize=14, fontweight="bold")
-    skew.ax.set_title(subtitulo, loc="right", fontsize=9)
-
-    texto = (
-        f"LCL: {fmt_lcl_pies(indices['LCL'])}\n"
-        f"CAPE: {fmt_indice(indices['CAPE'], 0, ' J/kg')}\n"
-        f"CIN: {fmt_indice(indices['CIN'], 0, ' J/kg')}\n"
-        f"LI: {fmt_indice(indices['LI'], 1, '')}\n"
-        f"K: {fmt_indice(indices['K'], 1, '')}\n"
-        f"TT: {fmt_indice(indices['TT'], 1, '')}\n"
-        f"PWAT: {fmt_indice(indices['PWAT'], 1, ' mm')}"
-    )
-
+    skew.ax.set_title(titulo, loc="left", fontsize=12, fontweight="bold", pad=8)
     skew.ax.text(
-        0.02,
-        0.03,
-        texto,
+        0.99, 1.012, meta,
         transform=skew.ax.transAxes,
-        fontsize=9,
-        va="bottom",
-        ha="left",
-        bbox=dict(boxstyle="round", facecolor="white", alpha=0.85)
+        fontsize=8, ha="right", va="bottom",
+        clip_on=False
     )
 
-    skew.ax.legend(loc="upper right", fontsize=9)
+    dibujar_panel_indices(skew, indices)
+
+    # La leyenda se coloca fuera del margen derecho, para no tapar las barbas.
+    skew.ax.legend(
+        loc="upper left",
+        bbox_to_anchor=(1.01, 0.88),
+        fontsize=8,
+        borderaxespad=0.0
+    )
 
     nombre_limpio = re.sub(r"[^A-Za-z0-9_\-]", "_", nombre_punto)
     fff_salida = fff if fff else f"{obtener_hora_pronostico_desde_nombre(archivo.name) or 0:03d}"
@@ -664,7 +841,7 @@ def generar_sounding(archivo, carpeta_salidas, lat, lon, nombre_punto):
 
 
 def main():
-    print("Usando sounding_gfs.py version defensiva v4 - perfil hasta 150 hPa")
+    print("Usando sounding_gfs.py v5 - SFC/MU parcel, MUCAPE, SWEAT, Tc y panel categorizado")
 
     if len(sys.argv) < 6:
         print("Uso: sounding_gfs.py archivo_grib carpeta_salidas lat lon nombre_punto")
