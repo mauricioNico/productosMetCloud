@@ -318,6 +318,59 @@ jobs:
             "${{ github.workspace }}\salida\loopSatelital.gif"
 
 
+      # Radar independiente: un fallo no impide conservar el GIF satelital.
+      - name: Descargar radar Ezeiza y generar animacion con Java
+        id: radar
+        continue-on-error: true
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $pagina = "https://www.climasurgba.com.ar/radar/ezeiza"
+          $html = (Invoke-WebRequest -Uri $pagina -UseBasicParsing -TimeoutSec 60).Content
+          $urls = @(
+            [regex]::Matches($html, '/radar/ezeiza-[0-9]{8}-[0-9]{6}\.png') |
+            ForEach-Object { $_.Value } |
+            Sort-Object -Unique |
+            Select-Object -Last 12
+          )
+          if ($urls.Count -lt 2) {
+            throw "Ezeiza: se necesitan al menos 2 imagenes para una animacion."
+          }
+
+          $fechaRadar = Get-Date -Format "yyyyMMdd"
+          $carpeta = "C:\descarga_modelos\$fechaRadar\RADAR_EZEIZA"
+          New-Item -ItemType Directory -Force -Path $carpeta | Out-Null
+          Add-Type -AssemblyName System.Drawing
+          $headers = @{ Referer = $pagina }
+          $numero = 0
+          foreach ($url in $urls) {
+            $numero++
+            $png = Join-Path $carpeta ("radar_{0:D2}.png" -f $numero)
+            Write-Host "Ezeiza $numero/$($urls.Count): $url"
+            Invoke-WebRequest -Uri "https://www.climasurgba.com.ar$url" -OutFile $png -TimeoutSec 60 -Headers $headers -UserAgent "Mozilla/5.0"
+          }
+
+          # El generador fuente ordena por nombre y conserva los PNG originales.
+          $destino = Join-Path $carpeta "gif"
+          java "${{ github.workspace }}\src\main\java\CrearGifDesdeCarpeta.java" $carpeta $destino 500
+          if ($LASTEXITCODE -ne 0) { throw "Java fallo al generar el radar: $LASTEXITCODE" }
+          $generados = @(Get-ChildItem $destino -Filter "animacion_satelite_*.gif")
+          if ($generados.Count -ne 1 -or $generados[0].Length -eq 0) {
+            throw "Java no genero un unico GIF de radar valido."
+          }
+          $gif = $generados[0].FullName
+
+          $animacion = [System.Drawing.Image]::FromFile($gif)
+          try {
+            $frames = $animacion.GetFrameCount([System.Drawing.Imaging.FrameDimension]::Time)
+            if ($frames -lt 2) { throw "El GIF de radar tiene menos de 2 cuadros." }
+            Write-Host "GIF Ezeiza: $frames cuadros, $((Get-Item $gif).Length) bytes"
+          } finally {
+            $animacion.Dispose()
+          }
+          Copy-Item $gif "${{ github.workspace }}\salida\loopRadarEzeiza.gif"
+          "Radar Ezeiza: $($urls.Count) imagenes, de $($urls[0]) a $($urls[-1])." >> $env:GITHUB_STEP_SUMMARY
+
       # ==========================================================
       # SUBIR ARTIFACT
       # ==========================================================
@@ -326,5 +379,11 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: loop-satelital-climasur
-          path: salida/loopSatelital.gif
+          path: salida/*.gif
           retention-days: 7
+
+      - name: Informar fallo del radar sin perder el artifact satelital
+        if: always() && steps.radar.outcome == 'failure'
+        shell: powershell
+        run: |
+          throw "Fallo el radar Ezeiza. El GIF satelital se conserva en el artifact si su generacion finalizo correctamente."
