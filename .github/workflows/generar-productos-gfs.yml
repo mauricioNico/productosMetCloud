@@ -3,10 +3,6 @@ name: Generar productos GFS
 on:
   workflow_dispatch:
 
-  schedule:
-    - cron: "0 4 * * *"   # 04 UTC
-    - cron: "0 18 * * *"  # 18 UTC
-
 jobs:
   build:
     runs-on: ubuntu-latest
