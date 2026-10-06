@@ -9,6 +9,8 @@ from pathlib import Path
 
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
+
+from mapa_proyeccion_adaptativa import elegir_proyeccion
 import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
@@ -111,18 +113,27 @@ def main():
     # las isotacas se expresan en nudos (kt).
     velocidad = np.hypot(u, v) * 1.94384
     inicio, valida, horas = fechas(u)
-    proy = ccrs.PlateCarree()
-    fig, ax = plt.subplots(figsize=(11.053, 9.053), subplot_kw={"projection": proy})
+    # 200 hPa ya normalizaba las longitudes para el mapa; se conserva.
+    left_mapa = ((left + 180.0) % 360.0) - 180.0
+    right_mapa = ((right + 180.0) % 360.0) - 180.0
+
+    map_crs, data_crs, polar, hemisferio, left_plot, right_plot = elegir_proyeccion(
+        top, bottom, left_mapa, right_mapa
+    )
+    if polar:
+        print(f"→ Proyección polar adaptativa activada ({hemisferio}).")
+    else:
+        print("→ Proyección regional normal (PlateCarree).")
+
+    fig, ax = plt.subplots(figsize=(11.053, 9.053), subplot_kw={"projection": map_crs})
     fig.subplots_adjust(left=0.045, right=0.875, top=0.895, bottom=0.045)
     fig.patch.set_alpha(0.0)
     agregar_fondo_gradiente(fig)
     ax.set_facecolor("#f7f7f5")
-    left_mapa = ((left + 180.0) % 360.0) - 180.0
-    right_mapa = ((right + 180.0) % 360.0) - 180.0
-    ax.set_extent([left_mapa, right_mapa, bottom, top], crs=proy)
+    ax.set_extent([left_plot, right_plot, bottom, top], crs=data_crs)
 
     gl = ax.gridlines(draw_labels=True, linewidth=0.5, color="gray", linestyle="--", alpha=0.55)
-    gl.xlocator = FixedLocator(np.arange(left_mapa, right_mapa + 1, 10))
+    gl.xlocator = FixedLocator(np.arange(min(left_plot, right_plot), max(left_plot, right_plot) + 1, 10))
     gl.ylocator = FixedLocator(np.arange(bottom, top + 1, 10))
     gl.top_labels = gl.right_labels = False
     gl.xlabel_style = gl.ylabel_style = {"size": 7}
@@ -132,7 +143,7 @@ def main():
                            "#116fb5", "#084b8a", "#3f1b78"])
     norm = BoundaryNorm(niveles, cmap.N)
     isotacas = ax.contourf(u.longitude, u.latitude, velocidad, levels=niveles,
-                          cmap=cmap, norm=norm, extend="max", transform=proy, zorder=1)
+                          cmap=cmap, norm=norm, extend="max", transform=data_crs, zorder=1)
 
     # streamplot necesita ejes crecientes; el GFS suele entregar latitudes decrecientes.
     lat = u.latitude.values
@@ -140,23 +151,62 @@ def main():
     if lat[0] > lat[-1]:
         lat, u_arr, v_arr = lat[::-1], u_arr[::-1, :], v_arr[::-1, :]
     paso = 2
-    corrientes = ax.streamplot(
-        u.longitude.values[::paso],
-        lat[::paso],
-        u_arr[::paso, ::paso],
-        v_arr[::paso, ::paso],
-        density=1.6,
-        color="#171717",
-        linewidth=0.75,
-        arrowsize=0.9,
-        arrowstyle="->",
-        minlength=0.15,
-        maxlength=4.0,
-        zorder=6,
-    )
-    # Refuerza el orden de dibujo en distintas versiones de Matplotlib/Cartopy.
-    corrientes.lines.set_zorder(6)
-    corrientes.arrows.set_zorder(6)
+    if polar:
+        # GeoAxes.streamplot acepta transform; Cartopy reproyecta el campo vectorial.
+        # Si una versión concreta de Cartopy falla cerca del polo, se usa una
+        # representación con barbas para no abortar toda la generación.
+        try:
+            corrientes = ax.streamplot(
+                u.longitude.values[::paso],
+                lat[::paso],
+                u_arr[::paso, ::paso],
+                v_arr[::paso, ::paso],
+                density=1.6,
+                color="#171717",
+                linewidth=0.75,
+                arrowsize=0.9,
+                arrowstyle="->",
+                minlength=0.15,
+                maxlength=4.0,
+                transform=data_crs,
+                zorder=6,
+            )
+        except Exception as exc:
+            print(f"⚠ streamplot polar no disponible ({exc}). Se usan barbas.")
+            corrientes = None
+            ax.barbs(
+                u.longitude.values[::4],
+                lat[::4],
+                u_arr[::4, ::4] * 1.94384,
+                v_arr[::4, ::4] * 1.94384,
+                transform=data_crs,
+                regrid_shape=22,
+                length=4.5,
+                linewidth=0.40,
+                color="#171717",
+                zorder=6,
+            )
+    else:
+        # Rama operativa original: se mantiene sin cambios para el multimodelo.
+        corrientes = ax.streamplot(
+            u.longitude.values[::paso],
+            lat[::paso],
+            u_arr[::paso, ::paso],
+            v_arr[::paso, ::paso],
+            density=1.6,
+            color="#171717",
+            linewidth=0.75,
+            arrowsize=0.9,
+            arrowstyle="->",
+            minlength=0.15,
+            maxlength=4.0,
+            zorder=6,
+        )
+
+    if corrientes is not None:
+        # Refuerza el orden de dibujo en distintas versiones de Matplotlib/Cartopy.
+        corrientes.lines.set_zorder(6)
+        corrientes.arrows.set_zorder(6)
 
     provincias = cfeature.NaturalEarthFeature("cultural", "admin_1_states_provinces_lines", "10m",
                                                edgecolor="#555555", facecolor="none")

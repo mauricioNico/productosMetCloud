@@ -12,6 +12,8 @@ import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 
+from mapa_proyeccion_adaptativa import elegir_proyeccion
+
 from matplotlib.colors import ListedColormap, BoundaryNorm, LinearSegmentedColormap
 from matplotlib.ticker import FixedLocator
 from matplotlib.cm import ScalarMappable
@@ -470,31 +472,39 @@ def main():
     # ---------------- FIGURA ----------------
     print("\n→ Generando carta...\n")
 
-    proj = ccrs.PlateCarree()
+    map_crs, data_crs, polar, hemisferio, left_mapa, right_mapa = elegir_proyeccion(
+        top, bottom, left, right
+    )
+
+    if polar:
+        print(f"→ Proyección polar adaptativa activada ({hemisferio}).")
+    else:
+        print("→ Proyección regional normal (PlateCarree).")
 
     fig, ax = plt.subplots(
         figsize=(11.053, 9.053),
-    subplot_kw={"projection": proj}
+        subplot_kw={"projection": map_crs}
     )
 
-    # Mapa casi a todo el ancho, dejando columna fina para escalas.
+    # Se conserva exactamente el layout operativo normal del multimodelo.
+    # La proyección solo cambia para dominios realmente enfocados en altas latitudes.
     fig.subplots_adjust(left=0.025, right=0.905, top=0.915, bottom=0.045)
 
     fig.patch.set_alpha(0.0)
     agregar_fondo_gradiente(fig)
     ax.set_facecolor("none")
 
-    ax.set_extent([left, right, bottom, top], crs=proj)
+    ax.set_extent([left_mapa, right_mapa, bottom, top], crs=data_crs)
 
     gl = ax.gridlines(
-        crs=proj,
+        crs=data_crs,
         draw_labels=True,
         linewidth=0.6,
         color="gray",
         linestyle="--",
         alpha=0.6
     )
-    gl.xlocator = FixedLocator(np.arange(left, right + 1, 10))
+    gl.xlocator = FixedLocator(np.arange(min(left_mapa, right_mapa), max(left_mapa, right_mapa) + 1, 10))
     gl.ylocator = FixedLocator(np.arange(bottom, top + 1, 10))
     gl.top_labels = False
     gl.right_labels = False
@@ -535,7 +545,7 @@ def main():
                 cmap=cmap_nub,
                 norm=norm_nub,
                 alpha=0.36,
-                transform=proj,
+                transform=data_crs,
                 extend="max",
                 zorder=1
             )
@@ -592,7 +602,7 @@ def main():
                 norm=norm_p,
                 extend="max",
                 alpha=0.60,
-                transform=proj,
+                transform=data_crs,
                 zorder=2
             )
 
@@ -663,7 +673,7 @@ def main():
                 colors=["#b36b00"],
                 linewidths=0.9,
                 linestyles="-",
-                transform=proj,
+                transform=data_crs,
                 zorder=8
             )
 
@@ -694,7 +704,7 @@ def main():
                 colors="black",
                 linewidths=0.6,
                 linestyles="--",
-                transform=proj,
+                transform=data_crs,
                 zorder=8
             )
 
@@ -714,7 +724,7 @@ def main():
                         levels=[lvl],
                         colors=col,
                         linewidths=1.4,
-                        transform=proj,
+                        transform=data_crs,
                         zorder=9
                     )
                     ax.clabel(c, inline=True, fontsize=7, fmt="%.0f")
@@ -735,7 +745,7 @@ def main():
             levels=niveles_mslp,
             colors="black",
             linewidths=0.9,
-            transform=proj,
+            transform=data_crs,
             zorder=10
         )
         ax.clabel(cs, inline=True, fontsize=7, fmt="%.0f")
@@ -770,7 +780,7 @@ def main():
                 v_plot[::paso, ::paso],
                 length=5,
                 linewidth=0.5,
-                transform=proj,
+                transform=data_crs,
                 zorder=11
             )
 

@@ -9,6 +9,8 @@ from pathlib import Path
 
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
+
+from mapa_proyeccion_adaptativa import elegir_proyeccion
 import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
@@ -111,16 +113,23 @@ def main():
     vort = vorticidad_relativa(u, v)
     inicio, valida, horas = fechas(z)
 
-    proy = ccrs.PlateCarree()
-    fig, ax = plt.subplots(figsize=(11.053, 9.053), subplot_kw={"projection": proy})
+    map_crs, data_crs, polar, hemisferio, left_mapa, right_mapa = elegir_proyeccion(
+        top, bottom, left, right
+    )
+    if polar:
+        print(f"→ Proyección polar adaptativa activada ({hemisferio}).")
+    else:
+        print("→ Proyección regional normal (PlateCarree).")
+
+    fig, ax = plt.subplots(figsize=(11.053, 9.053), subplot_kw={"projection": map_crs})
     fig.subplots_adjust(left=0.025, right=0.89, top=0.91, bottom=0.045)
     fig.patch.set_alpha(0)
     fondo(fig)
     ax.set_facecolor("#f4f2ed")
-    ax.set_extent([left, right, bottom, top], crs=proy)
+    ax.set_extent([left_mapa, right_mapa, bottom, top], crs=data_crs)
 
     gl = ax.gridlines(draw_labels=True, linewidth=0.5, color="gray", linestyle="--", alpha=0.55)
-    gl.xlocator = FixedLocator(np.arange(left, right + 1, 10))
+    gl.xlocator = FixedLocator(np.arange(min(left_mapa, right_mapa), max(left_mapa, right_mapa) + 1, 10))
     gl.ylocator = FixedLocator(np.arange(bottom, top + 1, 10))
     gl.top_labels = gl.right_labels = False
     gl.xlabel_style = gl.ylabel_style = {"size": 7}
@@ -131,13 +140,13 @@ def main():
     cmap = LinearSegmentedColormap.from_list("vorticidad", colores, N=len(colores))
     norm = BoundaryNorm(niveles_vort, cmap.N)
     sombreado = ax.contourf(z.longitude, z.latitude, vort, levels=niveles_vort,
-                           cmap=cmap, norm=norm, extend="both", transform=proy, zorder=1)
+                           cmap=cmap, norm=norm, extend="both", transform=data_crs, zorder=1)
 
     minimo = int(np.floor(float(z_dam.min()) / 6) * 6)
     maximo = int(np.ceil(float(z_dam.max()) / 6) * 6)
     contornos = ax.contour(z.longitude, z.latitude, z_dam,
                           levels=np.arange(minimo, maximo + 6, 6), colors="black",
-                          linewidths=1.0, transform=proy, zorder=5)
+                          linewidths=1.0, transform=data_crs, zorder=5)
     ax.clabel(contornos, inline=True, fontsize=7, fmt="%.0f")
 
     provincias = cfeature.NaturalEarthFeature("cultural", "admin_1_states_provinces_lines", "10m",
