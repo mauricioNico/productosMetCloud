@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+import os
 """Carta GFS de 500 hPa: altura geopotencial y vorticidad relativa."""
 
 import datetime as dt
@@ -174,3 +175,10 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+    # Evita fallos de teardown de cfgrib/eccodes después de guardar el PNG.
+    # El script ya terminó su trabajo; salir de forma inmediata evita SIGSEGV
+    # observados en algunos runners Linux al liberar librerías nativas.
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(0)
