@@ -36,22 +36,48 @@ se exportan al CSV cartográfico.
    consenso conservador ya implementado, devolviendo seis capas GeoJSON.
 7. Produce \`grilla_gfs_ecmwf_real.csv\` y \`manifest.json\`.
 
-## LIMITACIÓN cartográfica obligatoria
+## Regionalización geográfica digitalizada (SMN, julio de 2024)
 
-Los umbrales están asignados a **unidades puntuales**, NO existe aún
-un GeoJSON regional del SMN validado. Este ensayo sólo clasifica celdas
-de hasta **120 km** de una unidad con asignación existente en
-\`vigilancia/config/unidades.csv\`. Se asigna la región de la unidad
-más cercana dentro del radio. Las demás celdas son **SIN REGION**:
-no deben colorearse como verdes.
+Se recuperó el documento **“Umbrales para los alertas”**, segunda edición,
+julio de 2024, del Servicio Meteorológico Nacional. Las regiones coloreadas
+de la **página 4** (lluvia) y **página 6** (viento) se extrajeron del PDF
+y se registraron aproximadamente frente al contorno provincial de referencia.
 
-Se usa una cartografía provincial de **referencia** versionada en el
-repositorio; reemplazarla por IGN antes de producción.
+\`python/alertas_web/regiones_smn2024.py\` contiene las máscaras
+raster comprimidas para ocho categorías \`PP_R1..PP_R8\` de lluvia
+y tres \`WIND_R1..WIND_R3\` de viento.
 
-La clasificación no equivale a un alerta oficial del SMN o de la FAA.
-Estos colores son **indicadores experimentales de umbrales numéricos**.
-No publicar en \`imagenesmeteorologicas.faa.mil.ar\` hasta validar las
-regiones, acumulados y funcionamiento del consenso.
+**Ya no se aplica el radio de 120 km alrededor de las unidades.**
+Cada coordenada de malla se asigna a la máscara digitalizada y se
+aplican los umbrales de \`vigilancia/config/umbrales.csv\`.
+
+**Precauciones importantes:**
+
+- La fuente es un **mapa PDF raster de baja resolución**, no el archivo
+  vectorial regional del SMN; su georreferenciación es aproximada y la
+  correspondencia de los bordes debe corroborarse visualmente.
+- Un margen de **dos píxeles de imagen original** deja las celdas
+  próximas a bordes sin región, en lugar de asignarles un umbral ambiguo.
+- La zona coloreada específicamente como **Zonda** no se considera
+  automáticamente \`WIND_R1\`: Zonda exige diagnóstico independiente.
+- Se utiliza una cartografía provincial **de referencia**, no el dataset
+  verificado IGN/Georef. No se incluyen sectores antárticos.
+- Los indicadores coloreados **no son alertas oficiales** y el manifest
+  sigue con \`publicacion_autorizada=false\`.
+
+En la ejecución de laboratorio \`37985421539\`, de 4.436 celdas
+argentinas, 3.387 recibieron clase de lluvia y 3.210 clase de viento.
+Las demás permanecen **SIN_REGION_O_DATOS**.
+
+## GIS para inspección
+
+El artefacto incluye dos capas GIS adicionales con geometrías recortadas:
+- \`regiones_umbrales_lluvia_smn2024_PRELIMINAR.geojson\`
+- \`regiones_umbrales_viento_smn2024_PRELIMINAR.geojson\`
+
+Contienen metadatos \`uso_operativo_autorizado:false\` y estado
+\`PRELIMINAR_SIN_VALIDACION_GIS\`. No deben circular como cartografía
+oficial del SMN.
 
 ## Artefacto de Github Actions
 
@@ -64,6 +90,6 @@ Contiene:
 - \`grilla_gfs_ecmwf_real.csv\` (valores diarios equivalentes)
 - \`manifest.json\` (cobertura, origen y restricciones)
 
-En el visor v5 se carga **únicamente ese ZIP** para que se dibujen
+En el visor v6 se carga **únicamente ese ZIP** para que se dibujen
 automáticamente los seis mapas de categorías y las doce cartas de
 grilla (dos modelos x tres períodos x dos fenómenos).
