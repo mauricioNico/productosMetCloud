@@ -2,7 +2,7 @@
 """Clasificación espacial de LABORATORIO (NO OPERATIVA) a partir de dos CSV GRIB reales.
 
 Geografía: geometría provincial de respaldo (solo para ensayo).
-Regionalización: cercanía de <= 120 km a unidades con región conocida.
+Regionalización: máscara raster SMN 2024 georreferenciada aproximadamente.
 Los puntos restantes se etiquetan SIN_REGION y NO se colorean como verdes.
 La regionalización provisoria NO debe utilizarse para emitir alertas oficiales.
 """
@@ -20,6 +20,7 @@ from shapely.geometry import box, mapping, shape
 from shapely.ops import unary_union
 
 from generar_alertas_web import consenso, leer_umbrales, NIVELES
+from regiones_smn2024 import asignar_nombres, exportar_geojson
 
 PASOS = list(range(6, 73, 6))
 PLAZOS = (24, 48, 72)
@@ -108,30 +109,16 @@ def normalizar_acumulados(datos):
     return inc
 
 
-def mascara_y_regiones(lat, lon, pais, unidades_csv):
-    lons, lats = np.meshgrid(lon, lat)
-    dentro = shapely.contains_xy(pais, lons, lats)
-    regiones = {k:np.full(lons.shape, "", dtype="<U16") for k in ("LLUVIA", "VIENTO")}
-    menor = np.full(lons.shape, np.inf, dtype=float)
-    with open(unidades_csv, encoding="utf-8", newline="") as f:
-        for unidad in csv.DictReader(f, delimiter=";"):
-            if unidad.get("activo", "").lower() != "true":
-                continue
-            if not unidad["region_lluvia"].startswith("PP_R") or not unidad["region_viento"].startswith("WIND_R"):
-                continue
-            ulat, ulon = float(unidad["lat"]),float(unidad["lon"])
-            if not (-55 <= ulat <= -20 and -85 <= ulon <= -45):
-                continue
-            a1, a2 = np.deg2rad(lats), np.deg2rad(ulat)
-            dlat = a2 - a1
-            dlon = np.deg2rad(lons-ulon)
-            a = np.sin(dlat/2)**2 + np.cos(a1)*np.cos(a2)*np.sin(dlon/2)**2
-            km = 2*6371*np.arcsin(np.minimum(1,np.sqrt(a)))
-            accept = dentro & (km < menor) & (km <= RADIO_KM)
-            menor[accept] = km[accept]
-            regiones["LLUVIA"][accept] = unidad["region_lluvia"]
-            regiones["VIENTO"][accept] = unidad["region_viento"]
-    return dentro, regiones
+def mascara_y_regiones(lat, lon, pais, unidades_csv=None):
+    """Regiones digitales extraídas de mapas de umbrales SMN 2024.
+    Los bordes dudosos y la región Zonda quedan SIN_REGION.
+    """
+    lons,lats=np.meshgrid(lon,lat)
+    dentro=shapely.contains_xy(pais,lons,lats)
+    regiones={tipo:asignar_nombres(tipo,lat,lon,margen=2) for tipo in ("LLUVIA","VIENTO")}
+    for tipo in regiones:
+        regiones[tipo][~dentro]=""
+    return dentro,regiones
 
 
 def acumulados_y_viento(datos):
@@ -202,7 +189,7 @@ def convertir_geojson(lat, lon, niveles, fuentes, confianza, pais, fen, lead, ci
                            "periodo":f"{lead}h", "inicio_h":lead-24,
                            "fin_h":lead, "fuente":src, "confianza":conf,
                            "run_time":ciclo,"ambito":"EXPERIMENTAL",
-                           "regionalizacion":"RADIO_120_KM_UNIDADES_NO_OPERATIVO"}})
+                           "regionalizacion":"DIGITALIZACION_SAT2024_PRELIMINAR_NO_OPERATIVA"}})
     return {"type":"FeatureCollection","features":features}
 
 
@@ -225,12 +212,21 @@ def main():
     pais=geometria_provincias(repo)
     dentro,regiones=mascara_y_regiones(g["lat"],g["lon"],pais,repo/"vigilancia/config/unidades.csv")
     rules=leer_umbrales(repo/"vigilancia/config/umbrales.csv")
+    for tipo in ("LLUVIA","VIENTO"):
+        capa_regional=exportar_geojson(tipo,pais,margen=2)
+        (out/f"regiones_umbrales_{tipo.lower()}_smn2024_PRELIMINAR.geojson").write_text(
+            json.dumps(capa_regional,ensure_ascii=False),encoding="utf-8")
+    print("REGIONES DIGITALIZADAS:",
+          {k:int(np.count_nonzero(regiones[k])) for k in ("LLUVIA","VIENTO")},
+          "CELDAS ARGENTINAS:",int(np.count_nonzero(dentro)),flush=True)
     valores={m:acumulados_y_viento(d) for m,d in modelos.items()}
     meta={"tipo":"MONITOREO_EXPERIMENTAL_NO_OPERATIVO",
           "publicacion_autorizada":False, "run_time":g["run"],
           "dominio":{"south":-55,"north":-20,"west":-85,"east":-45},
-          "modelos":["GFS","ECMWF"],"regionalizacion":"Radio de 120 km alrededor de unidades. NO equivale a polígonos SMN.",
-          "restricciones":["Sólo se clasifican celdas cercanas a unidades existentes",
+          "modelos":["GFS","ECMWF"],"regionalizacion":"Máscaras digitalizadas de SMN umbrales 2024 (aproximadas, no validadas).",
+          "restricciones":["Bordes con margen de seguridad de 2 píxeles: pueden quedar áreas sin asignar",
+                           "Digitalización gráfica del PDF SMN julio 2024; NO es GeoJSON oficial",
+                           "Zonda excluido de la región de viento general",
                            "Mapa provincial de referencia comunitaria, no oficial",
                            "Viento y ráfagas muestreados cada 6 horas",
                            "Sin regiones cartográficas nacionales verificadas, no publicar"],
