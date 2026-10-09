@@ -7,6 +7,7 @@ on:
       - test/alertas-web-lluvia-viento
     paths:
       - python/alertas_web/probar_grib_real.py
+      - python/alertas_web/clasificar_grilla_regional_lab.py
       - .github/workflows/probar-grilla-real.yml
 
 permissions:
@@ -38,7 +39,7 @@ jobs:
       matrix:
         modelo: [GFS, ECMWF]
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 70
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -65,11 +66,11 @@ jobs:
           p=Path("salida_grilla")
           meta=json.loads((p/f"manifest_{m}.json").read_text())
           rows=list(csv.DictReader((p/f"grilla_{m}_real.csv").open(),delimiter=";"))
-          assert len(meta["datos"])==3 and len(rows)>100
-          assert sorted(set(int(r["lead_h"]) for r in rows))==[24,48,72]
+          assert len(meta["datos"])==12 and len(rows)>100
+          assert sorted(set(int(r["lead_h"]) for r in rows))==list(range(6,73,6))
           assert all(r["estado"]=="GRIB_REAL_EXPERIMENTAL_NO_ALERTA" for r in rows)
           assert meta["estado"]=="GRIB_REAL_EXPERIMENTAL_NO_ALERTA"
-          print(f"OK {m}: {len(rows)} puntos, plazos f024/f048/f072")
+          print(f"OK {m}: {len(rows)} puntos, doce plazos f006...f072")
           print("Intervalos de precipitación:", [(x["f"],x["precip_grib_stepRange"],x["precip_interval_h"]) for x in meta["datos"]])
           PY
       - uses: actions/upload-artifact@v4
@@ -85,27 +86,44 @@ jobs:
   combinar:
     needs: extraer
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Instalar numpy, pandas, shapely
+        run: python -m pip install "numpy>=1.26,<3" "pandas>=2,<3" "shapely>=2,<3"
       - uses: actions/download-artifact@v4
         with:
           pattern: grilla-real-*-lab
           merge-multiple: true
           path: grillas
-      - name: Construir CSV compatible con el visor
+      - name: Aplicar umbrales regionales SOLO EN AREAS EXPERIMENTALES
+        run: |
+          python python/alertas_web/clasificar_grilla_regional_lab.py \
+            --gfs grillas/grilla_gfs_real.csv \
+            --ecmwf grillas/grilla_ecmwf_real.csv \
+            --repo . \
+            --out salidas_regionales
+      - name: Controlar seis mapas y no publicacion
         run: |
           python - <<'PY'
+          import json
           from pathlib import Path
-          base=Path("grillas")
-          a=(base/"grilla_gfs_real.csv").read_text(encoding="utf-8").splitlines()
-          b=(base/"grilla_ecmwf_real.csv").read_text(encoding="utf-8").splitlines()
-          assert a[0]==b[0], "Columnas GFS/ECMWF diferentes"
-          out=base/"grilla_gfs_ecmwf_real.csv"
-          out.write_text("\n".join(a+b[1:])+"\n", encoding="utf-8")
-          print("LISTO:",out,"con",len(a)+len(b)-2,"registros meteorológicos reales")
+          m=json.loads(Path('salidas_regionales/manifest.json').read_text())
+          assert m['publicacion_autorizada'] is False
+          assert len(m['capas'])==6
+          for f in m['capas'].values():
+              js=json.loads((Path('salidas_regionales')/f).read_text())
+              assert js['type']=='FeatureCollection'
+              assert all(x['properties']['ambito']=='EXPERIMENTAL' for x in js['features'])
+          assert (Path('salidas_regionales/grilla_gfs_ecmwf_real.csv').stat().st_size > 2000)
+          print('OK: seis capas de umbrales experimentales, CSV y manifest. NO SE PUBLICA.')
           PY
       - name: Guardar salida aislada, NO PUBLICABLE
         uses: actions/upload-artifact@v4
         with:
-          name: grilla-real-gfs-ecmwf-experimental
-          path: grillas/
+          name: alertas-regionales-reales-EXPERIMENTAL
+          path: salidas_regionales/
           retention-days: 7
