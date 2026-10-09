@@ -159,16 +159,31 @@ def cropped(da):
     return lats[yi], signed[xi], data
 
 
-def periodo_precipitacion(da, step):
-    """Nunca atribuir 24 h si el mensaje GRIB no acredita la ventana."""
-    meta = str(da.attrs.get("GRIB_stepRange", ""))
-    typ = str(da.attrs.get("GRIB_stepType", "")).lower()
-    # Ej. 0-24, 18-24, 24 (debe considerarse desconocido si no hay metadato).
-    match = re.fullmatch(r"(\d+)-(\d+)", meta)
-    hours = int(match.group(2)) - int(match.group(1)) if match else None
-    if typ != "accum" or not hours or int(match.group(2)) != step:
-        return None, meta, False
-    return hours, meta, True
+def periodo_precipitacion(path, step):
+    """Lee ventana temporal desde ecCodes; cfgrib no siempre expone GRIB_stepRange."""
+    import eccodes
+    with Path(path).open("rb") as fh:
+        while True:
+            gid = eccodes.codes_grib_new_from_file(fh)
+            if gid is None:
+                break
+            try:
+                short = str(eccodes.codes_get(gid, "shortName")).lower()
+                if short not in ("tp", "apcp"):
+                    continue
+                start = int(eccodes.codes_get(gid, "startStep"))
+                end = int(eccodes.codes_get(gid, "endStep"))
+                typ = str(eccodes.codes_get(gid, "stepType")).lower()
+                units = eccodes.codes_get(gid, "stepUnits")
+                desc = f"{start}-{end};tipo={typ};unidades={units}"
+                print("PERIODO GRIB PRECIPITACION:", path.name, desc, flush=True)
+                # ecCodes stepUnits 'h' / 1; no convertir unidades temporales desconocidas.
+                if typ != "accum" or end != step or start >= end or str(units) not in ("h", "1"):
+                    return None, desc, False
+                return end-start, desc, True
+            finally:
+                eccodes.codes_release(gid)
+    return None, "SIN_CAMPO_TP", False
 
 
 def convertir(model, run, step, path):
@@ -187,7 +202,7 @@ def convertir(model, run, step, path):
     if str(fields["tp"].attrs.get("units", "")) not in (
         "m", "metre", "metres", "meter", "meters", "kg m**-2", "mm"):
         raise ValueError(f"Unidad de precipitación desconocida: {fields['tp'].attrs.get('units')!r}")
-    hours, raw_window, valid_tp = periodo_precipitacion(fields["tp"], step)
+    hours, raw_window, valid_tp = periodo_precipitacion(path, step)
     precip = tp * factor if valid_tp else None
     gust = None
     if "gust" in fields:
