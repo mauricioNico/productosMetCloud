@@ -1,0 +1,62 @@
+name: PRUEBA - Mapas web lluvia y viento (simulacion)
+
+on:
+  push:
+    branches:
+      - test/alertas-web-lluvia-viento
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  prueba_alertas_web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Descargar codigo de prueba
+        uses: actions/checkout@v4
+      - name: Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Instalar dependencias minimas
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "numpy>=1.26,<3" "shapely>=2,<3"
+      - name: Probar clasificacion, consenso y geometria
+        run: python -m unittest discover -s python/alertas_web/tests -v
+      - name: Preparar grillas SINTETICAS
+        run: python python/alertas_web/crear_demo.py --output demo_alertas_web
+      - name: Generar capas SIMULADAS (sin publicacion web)
+        run: |
+          python python/alertas_web/generar_alertas_web.py \
+            --gfs demo_alertas_web/gfs.npz \
+            --ecmwf demo_alertas_web/ecmwf.npz \
+            --mask demo_alertas_web/mascara_ficticia.geojson \
+            --thresholds vigilancia/config/umbrales.csv \
+            --output salidas_alertas_web \
+            --simulacion
+      - name: Verificar archivo manifiesto y seis capas
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          out = Path("salidas_alertas_web")
+          m = json.loads((out/"manifest.json").read_text())
+          assert m["estado"] == "SIMULACION"
+          assert m["publicacion_autorizada"] is False
+          assert len(m["capas"]) == 6
+          for path in m["capas"].values():
+              fc = json.loads((out/path).read_text())
+              assert fc["type"] == "FeatureCollection"
+              assert all(f["properties"]["simulacion"] for f in fc["features"])
+              print(path, "poligonos:", len(fc["features"]))
+          print("OK: 6 capas SINTETICAS validadas; NO SE PUBLICAN")
+          PY
+      - name: Guardar artifact NO PUBLICABLE
+        uses: actions/upload-artifact@v4
+        with:
+          name: alertas-web-simulacion
+          path: salidas_alertas_web/
+          retention-days: 3
