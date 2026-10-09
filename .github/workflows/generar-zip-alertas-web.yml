@@ -1,0 +1,157 @@
+name: Monitoreo extremo - ZIP experimental para visor
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 15 * * *"   # diario a las 15 UTC (12:00 Argentina)
+  push:
+    branches:
+      - master
+      - feature/publicar-zip-alertas-en-master
+    paths:
+      - python/alertas_web/**
+      - web/cartografia/**
+      - vigilancia/config/umbrales.csv
+      - .github/workflows/generar-zip-alertas-web.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: monitoreo-web-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  seleccion_ciclo:
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.ciclo.outputs.run }}
+    steps:
+      - name: Elegir ciclo 00/12 UTC con margen de disponibilidad
+        id: ciclo
+        run: |
+          RUN=$(python - <<'PY'
+          from datetime import datetime,timedelta,timezone
+          t=datetime.now(timezone.utc)-timedelta(hours=14)
+          h=12 if t.hour>=12 else 0
+          print(t.strftime('%Y%m%d')+f'{h:02d}')
+          PY
+          )
+          echo "run=$RUN" >> "$GITHUB_OUTPUT"
+          echo "El ciclo usado por ambos modelos es $RUN UTC"
+
+  extraer:
+    needs: seleccion_ciclo
+    strategy:
+      fail-fast: false
+      matrix:
+        modelo: [GFS, ECMWF]
+    runs-on: ubuntu-latest
+    timeout-minutes: 70
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Instalar lector GRIB y cliente ECMWF
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "numpy>=1.26,<3" "xarray>=2024.1" "cfgrib>=0.9.15" "eccodes>=2" "ecmwf-opendata>=0.3.6" "requests>=2.31"
+      - name: Descargar y extraer valores de grilla REAL ${{ matrix.modelo }}
+        run: |
+          python python/alertas_web/probar_grib_real.py \
+            --modelo "${{ matrix.modelo }}" \
+            --run-utc "${{ needs.seleccion_ciclo.outputs.run }}" \
+            --output salida_grilla
+      - name: Verificar CSV y metadatos sin emitir alertas
+        env:
+          MODELO: ${{ matrix.modelo }}
+        run: |
+          python - <<'PY'
+          import csv,json,os
+          from pathlib import Path
+          m=os.environ["MODELO"].lower()
+          p=Path("salida_grilla")
+          meta=json.loads((p/f"manifest_{m}.json").read_text())
+          rows=list(csv.DictReader((p/f"grilla_{m}_real.csv").open(),delimiter=";"))
+          assert len(meta["datos"])==12 and len(rows)>100
+          assert sorted(set(int(r["lead_h"]) for r in rows))==list(range(6,73,6))
+          assert all(r["estado"]=="GRIB_REAL_EXPERIMENTAL_NO_ALERTA" for r in rows)
+          assert meta["estado"]=="GRIB_REAL_EXPERIMENTAL_NO_ALERTA"
+          print(f"OK {m}: {len(rows)} puntos, doce plazos f006...f072")
+          print("Intervalos de precipitación:", [(x["f"],x["precip_grib_stepRange"],x["precip_interval_h"]) for x in meta["datos"]])
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: grilla-real-${{ matrix.modelo }}-lab
+          path: |
+            salida_grilla/*.csv
+            salida_grilla/*.json
+          if-no-files-found: warn
+          retention-days: 3
+
+  combinar:
+    needs: extraer
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Instalar numpy, pandas, shapely
+        run: python -m pip install "numpy>=1.26,<3" "pandas>=2,<3" "shapely>=2,<3" "scipy>=1.11" "rasterio>=1.3"
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: grilla-real-*-lab
+          merge-multiple: true
+          path: grillas
+      - name: Validar máscaras digitales de SMN 2024
+        run: |
+          PYTHONPATH=python/alertas_web python - <<'PY'
+          import numpy as np
+          from regiones_smn2024 import mascara, asignar_nombres
+          for tipo,max_id in [('LLUVIA',8),('VIENTO',4)]:
+              m=mascara(tipo)
+              assert max_id in np.unique(m)
+              assert 0 in np.unique(m)
+              names=asignar_nombres(tipo,np.arange(-55,-20,.25),np.arange(-85,-45,.25))
+              assert names.shape==(140,160)
+              assert np.count_nonzero(names)>500
+              assert not np.any(names=='ZONDA_SIN_UMBRAL_DE_VIENTO')
+              print(tipo,np.count_nonzero(names),'puntos seguros de referencia')
+          PY
+      - name: Aplicar umbrales regionales SOLO EN AREAS EXPERIMENTALES
+        run: |
+          python python/alertas_web/clasificar_grilla_regional_lab.py \
+            --gfs grillas/grilla_gfs_real.csv \
+            --ecmwf grillas/grilla_ecmwf_real.csv \
+            --repo . \
+            --out salidas_regionales
+      - name: Controlar seis mapas y no publicacion
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          m=json.loads(Path('salidas_regionales/manifest.json').read_text())
+          assert m['publicacion_autorizada'] is False
+          assert len(m['capas'])==6
+          for tipo in ('lluvia','viento'):
+              path=Path(f'salidas_regionales/regiones_umbrales_{tipo}_smn2024_PRELIMINAR.geojson')
+              geo=json.loads(path.read_text())
+              assert geo['metadata']['uso_operativo_autorizado'] is False
+              assert len(geo['features']) >= (8 if tipo=='lluvia' else 3)
+          for f in m['capas'].values():
+              js=json.loads((Path('salidas_regionales')/f).read_text())
+              assert js['type']=='FeatureCollection'
+              assert all(x['properties']['ambito']=='EXPERIMENTAL' for x in js['features'])
+          assert (Path('salidas_regionales/grilla_gfs_ecmwf_real.csv').stat().st_size > 2000)
+          print('OK: seis capas de umbrales experimentales, CSV y manifest. NO SE PUBLICA.')
+          PY
+      - name: Publicar ZIP en GitHub Actions (NO alerta operativa)
+        uses: actions/upload-artifact@v4
+        with:
+          name: alertas-regionales-reales-EXPERIMENTAL
+          path: salidas_regionales/
+          retention-days: 14
