@@ -77,9 +77,24 @@ def normalizar_acumulados(datos):
     if not np.all(np.isfinite(pp)):
         raise ValueError(f"{datos['model']}: faltan valores de lluvia GRIB")
     if datos["model"] == "GFS":
-        if not np.all(datos["precip_window_h"] == 6):
-            raise ValueError("GFS no entrega intervalos de 6 h en todos los pasos")
-        inc = pp.copy()
+        # GFS puede entregar 0-fN (acumulado desde el ciclo) O f(N-6)-fN.
+        # El índice NOAA confirma ambos tipos en una misma corrida.
+        # Reconstruir 6h usando el saldo ya acumulado hasta el paso anterior.
+        windows = datos["precip_window_h"]
+        inc = np.zeros_like(pp)
+        saldo = np.zeros_like(pp[0])
+        for i, step in enumerate(PASOS):
+            if np.all(windows[i] == step):
+                # De 0 a fN, restar la precipitación de f000 a f(N-6).
+                nueva = pp[i] - saldo
+            elif np.all(windows[i] == 6):
+                nueva = pp[i]
+            else:
+                raise ValueError(f"GFS f{step}: ventana no compatible con sumas de 6h")
+            if np.nanmin(nueva) < -0.2:
+                raise ValueError(f"GFS f{step}: descenso del acumulado al restar intervalo previo")
+            inc[i] = np.maximum(nueva, 0)
+            saldo += inc[i]
     elif datos["model"] == "ECMWF":
         for i, step in enumerate(PASOS):
             if not np.all(datos["precip_window_h"][i] == step):
@@ -171,7 +186,6 @@ def categorizar(valores, fenomeno, regiones, rules):
 def convertir_geojson(lat, lon, niveles, fuentes, confianza, pais, fen, lead, ciclo):
     # Transformación de malla a polígonos, fusionando celdas vecinas del mismo nivel.
     geoms = {}
-    areas = shapely.box(*np.meshgrid(lon-0.125, lat-0.125)[::-1], *np.meshgrid(lon+0.125, lat+0.125)[::-1]) if False else None
     from shapely.geometry import box as cell
     present = np.argwhere(niveles >= 0)
     for i, j in present:
