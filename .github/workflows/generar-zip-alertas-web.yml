@@ -3,7 +3,8 @@ name: Monitoreo extremo - ZIP experimental para visor
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 15 * * *"   # diario a las 15 UTC (12:00 Argentina)
+    - cron: "0 4 * * *"    # misma hora multimodelo: 04 UTC (01:00 Argentina)
+    - cron: "0 18 * * *"   # misma hora multimodelo: 18 UTC (15:00 Argentina)
   push:
     branches:
       - master
@@ -27,11 +28,13 @@ jobs:
     outputs:
       run: ${{ steps.ciclo.outputs.run }}
     steps:
-      - name: Elegir ciclo 00/12 UTC con margen de disponibilidad
+      - name: Elegir ciclo estable 00/12 UTC (mismo criterio del multimodelo)
         id: ciclo
         run: |
           RUN=$(python - <<'PY'
           from datetime import datetime,timedelta,timezone
+          # Margen de disponibilidad ECMWF: 04 UTC -> 12Z de ayer;
+          # 18 UTC -> 00Z de hoy. Así evitamos pedir 00/12 recién publicados.
           t=datetime.now(timezone.utc)-timedelta(hours=14)
           h=12 if t.hour>=12 else 0
           print(t.strftime('%Y%m%d')+f'{h:02d}')
