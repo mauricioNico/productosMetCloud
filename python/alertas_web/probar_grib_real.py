@@ -16,8 +16,8 @@ import cfgrib
 import numpy as np
 import requests
 
-AREA = {"south": -40., "north": -30., "west": -68., "east": -54.}
-HORIZONTES = (24, 48, 72)
+AREA = {"south": -55., "north": -20., "west": -85., "east": -45.}
+HORIZONTES = tuple(range(6, 73, 6))
 FIELDS = {
     "u10": ("u10", "10u", "ugrd"),
     "v10": ("v10", "10v", "vgrd"),
@@ -275,8 +275,8 @@ def main():
     }
     (out / f"manifest_{args.modelo.lower()}.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
-    if len(metadata) != 3:
-        raise RuntimeError("Faltan plazos")
+    if len(metadata) != len(HORIZONTES):
+        raise RuntimeError("Faltan pasos de 6 horas")
     print(f"OK {args.modelo}: {len(rows)} puntos, {len(metadata)} pronósticos -> {file}")
 
 
