@@ -28,14 +28,16 @@ jobs:
     outputs:
       run: ${{ steps.ciclo.outputs.run }}
     steps:
-      - name: Elegir ciclo estable 00/12 UTC (mismo criterio del multimodelo)
+      - name: Elegir ciclo 00/12 UTC con 8 horas de disponibilidad
         id: ciclo
         run: |
           RUN=$(python - <<'PY'
           from datetime import datetime,timedelta,timezone
-          # Margen de disponibilidad ECMWF: 04 UTC -> 12Z de ayer;
-          # 18 UTC -> 00Z de hoy. Así evitamos pedir 00/12 recién publicados.
-          t=datetime.now(timezone.utc)-timedelta(hours=14)
+          # Mínimo 8 horas para que GFS/ECMWF dispongan de los plazos.
+          # A las 23 UTC el candidato ya es 12Z, no 00Z.
+          # En los horarios del cron (04/18 UTC), los ciclos son
+          # 12Z del día anterior / 00Z del mismo día, respectivamente.
+          t=datetime.now(timezone.utc)-timedelta(hours=8)
           h=12 if t.hour>=12 else 0
           print(t.strftime('%Y%m%d')+f'{h:02d}')
           PY
