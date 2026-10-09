@@ -8,10 +8,10 @@ on:
   push:
     branches:
       - master
-      - feature/publicar-zip-alertas-en-master
     paths:
       - python/alertas_web/**
       - web/cartografia/**
+      - web/monitoreo-extremo/**
       - vigilancia/config/umbrales.csv
       - .github/workflows/generar-zip-alertas-web.yml
 
@@ -160,3 +160,101 @@ jobs:
           name: alertas-regionales-reales-EXPERIMENTAL
           path: salidas_regionales/
           retention-days: 14
+
+
+  publicar_pages:
+    name: Publicar visor FAA en GitHub Pages
+    # Se reemplaza la web SOLO cuando los dos modelos y las seis capas terminaron bien.
+    needs: combinar
+    if: ${{ github.ref == 'refs/heads/master' && needs.combinar.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Recuperar ZIP regional validado
+        uses: actions/download-artifact@v4
+        with:
+          name: alertas-regionales-reales-EXPERIMENTAL
+          path: salidas_publicacion
+      - name: Construir sitio estático y verificar contenido
+        run: |
+          python - <<'PY'
+          import csv, json, zipfile
+          from pathlib import Path
+          from datetime import datetime, timezone
+          entrada=Path('salidas_publicacion')
+          web=Path('web/monitoreo-extremo/index.html')
+          sitio=Path('_site')
+          datos=sitio/'datos'
+          datos.mkdir(parents=True,exist_ok=True)
+          assert web.is_file(), 'No existe el visor web FAA'
+          html=web.read_text(encoding='utf-8')
+          assert 'cargarPublicacionAutomatica();' in html
+          assert 'Meteorología FAA' in html
+          assert 'id="prevDay"' in html
+          files=['grilla_gfs_ecmwf_real.csv','manifest.json']
+          for fen in ('lluvia','viento'):
+              for lead in (24,48,72):
+                  files.append(f'{fen}_{lead}h.geojson')
+          for name in files:
+              p=entrada/name
+              assert p.is_file() and p.stat().st_size>0, f'Falta {name}'
+          m=json.loads((entrada/'manifest.json').read_text(encoding='utf-8'))
+          assert m['publicacion_autorizada'] is False
+          assert len(m['capas'])==6
+          assert m['run_time'].endswith('Z')
+          for name in files[2:]:
+              capa=json.loads((entrada/name).read_text(encoding='utf-8'))
+              assert capa['type']=='FeatureCollection'
+              assert all(f['properties'].get('ambito')=='EXPERIMENTAL' for f in capa['features'])
+          with (entrada/files[0]).open(encoding='utf-8', newline='') as f:
+              lector=csv.DictReader(f, delimiter=';')
+              assert {'model','run_time','lead_h','lat','lon','precip_interval_mm','wind_kmh','gust_kmh'} <= set(lector.fieldnames)
+              cnt=0
+              modelos=set()
+              plazos=set()
+              ciclos=set()
+              for fila in lector:
+                  cnt+=1
+                  modelos.add(fila['model'])
+                  plazos.add(int(fila['lead_h']))
+                  ciclos.add(fila['run_time'])
+          assert cnt>1000 and modelos=={'GFS','ECMWF'} and plazos=={24,48,72}
+          assert ciclos=={m['run_time']}, 'CSV y metadatos pertenecen a corridas diferentes'
+          (sitio/'index.html').write_text(html,encoding='utf-8')
+          (sitio/'.nojekyll').write_text('',encoding='utf-8')
+          with zipfile.ZipFile(datos/'monitoreo-extremo.zip','w',
+                               compression=zipfile.ZIP_DEFLATED,compresslevel=6) as z:
+              for name in files:
+                  z.write(entrada/name,arcname=name)
+          publicado=datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+          info={'estado':'PUBLICADO','ciclo_utc':m['run_time'],
+                'publicado_utc':publicado,'modelos':sorted(modelos),
+                'registros':cnt,'capas_geojson':6,
+                'dominio':m['dominio'],'publicacion_autorizada':False,
+                'tipo':'MONITOREO_EXPERIMENTAL_NO_OPERATIVO',
+                'fuente_workflow':'Monitoreo extremo',
+                'sha_codigo':'${{ github.sha }}'}
+          (datos/'publicacion.json').write_text(
+              json.dumps(info,ensure_ascii=False,indent=2),encoding='utf-8')
+          assert zipfile.ZipFile(datos/'monitoreo-extremo.zip').testzip() is None
+          print('OK: sitio listo, GFS + ECMWF, 6 capas, ciclo',m['run_time'],
+                'registros',cnt,'tamaño ZIP', (datos/'monitoreo-extremo.zip').stat().st_size)
+          print('Página NO OPERATIVA, publicación del sitio habilitada solo tras validación.')
+          PY
+      - name: Configurar GitHub Pages
+        uses: actions/configure-pages@v5
+      - name: Subir sitio estático a GitHub Pages
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: _site
+      - name: Publicar última corrida válida
+        id: deployment
+        uses: actions/deploy-pages@v4
