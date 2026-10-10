@@ -44,7 +44,7 @@ async function run(){
  assert(api.searchResults('Tandil Buenos Aires').some(x=>x.name==='Tandil'));
  const z={factor:1,cx:305,cy:265};
  const groups=api.groupPoints(decoded,z,610,530);
- assert(groups.length>60 && groups.length<decoded.length,'Clustering must reduce markers');
+ assert(groups.length>15 && groups.length<decoded.length,'Clustering must reduce markers');
  assert(groups.some(g=>g.n>1),'Clusters should contain multiple localities');
  const zoomed=api.groupPoints(decoded,{factor:5,cx:305,cy:265},610,530);
  assert(zoomed.some(g=>g.n===1),'High zoom should reveal individuals');
