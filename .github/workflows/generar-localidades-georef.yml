@@ -25,6 +25,22 @@ jobs:
           python-version: "3.11"
       - name: Descargar listado completo GeoRef, verificar y compactar
         run: python web/monitoreo-extremo/tools/actualizar_localidades_georef.py
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Comprobar búsqueda, agrupamiento y origen GeoRef
+        run: node web/monitoreo-extremo/tests/localidades.test.cjs
+      - name: Comprobar sintaxis del visor y el módulo de localidades
+        run: |
+          node --check web/monitoreo-extremo/localidades-layer.js
+          node - <<'JS'
+          const fs=require('fs');
+          const s=fs.readFileSync('web/monitoreo-extremo/index.html','utf8');
+          const js=s.slice(s.lastIndexOf('<script>')+8,s.lastIndexOf('</script>'));
+          new Function(js);
+          if(!s.includes('localidades-layer.js')||!s.includes('placeSearch'))throw Error('Buscador sin integrar');
+          console.log('HTML y JS: sintaxis y referencias OK.');
+          JS
       - name: Versionar snapshot oficial para GitHub Pages
         run: |
           git config user.name "github-actions[bot]"
