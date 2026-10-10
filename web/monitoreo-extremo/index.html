@@ -251,7 +251,7 @@ function attachMapZoom(canvas,card){
   canvas.addEventListener(evt,release);
  canvas.addEventListener('mousemove',e=>window.GeoRefPlaces?.hover(canvas,e));
  canvas.addEventListener('click',e=>window.GeoRefPlaces?.click(canvas,e));
- render();
+ render();window.GeoRefPlaces?.focusCurrent(canvas);
 }
 
 function drawOne(canvas,rows,kind){const ctx=canvas.getContext('2d');const sc=window.devicePixelRatio||1;canvas.width=Math.round(W*sc);canvas.height=Math.round(H*sc);ctx.setTransform(sc,0,0,sc,0,0);ctx.clearRect(0,0,W,H);ctx.fillStyle='#aeddf2';ctx.fillRect(0,0,W,H);drawCountries(ctx);
