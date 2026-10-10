@@ -6,5 +6,165 @@
   "maps_per_day": 4,
   "original_alert_polygons_preserved": true,
   "javascript_errors": [],
-  "baseline": false
+  "baseline": false,
+  "labels": [
+    {
+      "iso": "ARG",
+      "territory": true,
+      "frame": true
+    },
+    {
+      "iso": "CHL",
+      "territory": true,
+      "frame": true
+    },
+    {
+      "iso": "URY",
+      "territory": true,
+      "frame": true
+    },
+    {
+      "iso": "PRY",
+      "territory": true,
+      "frame": true
+    },
+    {
+      "iso": "BOL",
+      "territory": true,
+      "frame": true
+    },
+    {
+      "iso": "BRA",
+      "territory": true,
+      "frame": true
+    }
+  ],
+  "canvas_clipping": {
+    "leaks": 0,
+    "changedInside": 38211,
+    "unchanged": true
+  },
+  "outside_tooltips": [
+    {
+      "day": 1,
+      "place": "Atlantic",
+      "tooltip_hidden": true
+    },
+    {
+      "day": 1,
+      "place": "Chile",
+      "tooltip_hidden": true
+    },
+    {
+      "day": 1,
+      "place": "Uruguay",
+      "tooltip_hidden": true
+    },
+    {
+      "day": 1,
+      "place": "Brazil",
+      "tooltip_hidden": true
+    },
+    {
+      "day": 1,
+      "place": "Rio de la Plata",
+      "tooltip_hidden": true
+    },
+    {
+      "day": 1,
+      "place": "Buenos Aires coast",
+      "tooltip_hidden": true
+    },
+    {
+      "day": 1,
+      "place": "Patagonian coast",
+      "tooltip_hidden": true
+    },
+    {
+      "day": 1,
+      "place": "Tierra del Fuego Chile",
+      "tooltip_hidden": true
+    },
+    {
+      "day": 2,
+      "place": "Atlantic",
+      "tooltip_hidden": true
+    },
+    {
+      "day": 2,
+      "place": "Chile",
+      "tooltip_hidden": true
+    },
+    {
+      "day": 2,
+      "place": "Uruguay",
+      "tooltip_hidden": true
+    },
+    {
+      "day": 2,
+      "place": "Brazil",
+      "tooltip_hidden": true
+    },
+    {
+      "day": 2,
+      "place": "Rio de la Plata",
+      "tooltip_hidden": true
+    },
+    {
+      "day": 2,
+      "place": "Buenos Aires coast",
+      "tooltip_hidden": true
+    },
+    {
+      "day": 2,
+      "place": "Patagonian coast",
+      "tooltip_hidden": true
+    },
+    {
+      "day": 2,
+      "place": "Tierra del Fuego Chile",
+      "tooltip_hidden": true
+    },
+    {
+      "day": 3,
+      "place": "Atlantic",
+      "tooltip_hidden": true
+    },
+    {
+      "day": 3,
+      "place": "Chile",
+      "tooltip_hidden": true
+    },
+    {
+      "day": 3,
+      "place": "Uruguay",
+      "tooltip_hidden": true
+    },
+    {
+      "day": 3,
+      "place": "Brazil",
+      "tooltip_hidden": true
+    },
+    {
+      "day": 3,
+      "place": "Rio de la Plata",
+      "tooltip_hidden": true
+    },
+    {
+      "day": 3,
+      "place": "Buenos Aires coast",
+      "tooltip_hidden": true
+    },
+    {
+      "day": 3,
+      "place": "Patagonian coast",
+      "tooltip_hidden": true
+    },
+    {
+      "day": 3,
+      "place": "Tierra del Fuego Chile",
+      "tooltip_hidden": true
+    }
+  ],
+  "zip_sha256": "2f3a16329afb931b0f4bee4ae83e0eab5afc4c4ac05beb319a66f5eafeff4180"
 }

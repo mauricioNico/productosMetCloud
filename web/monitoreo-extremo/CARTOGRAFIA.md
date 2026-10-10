@@ -13,7 +13,9 @@ La cartografía derivada está en `base-cartography.js`, junto al visor; el work
 
 ## Separación de la meteorología
 
-Los GeoJSON de alertas conservan todas sus coordenadas y propiedades. Solo se proyectan al dibujarse; no se recortan ni recalculan. Los tooltips seleccionan los polígonos originales incluso cuando su geometría no coincide exactamente con la nueva costa de referencia.
+Los GeoJSON de alertas conservan todas sus coordenadas y propiedades. Solo se proyectan al dibujarse; no se recortan ni recalculan. La vigilancia se dibuja dentro de un recorte Canvas del contorno IGN (`clip('evenodd')`), que respeta polígonos múltiples y huecos. El recorte afecta únicamente los píxeles: no modifica las capas. Los tooltips primero verifican la pertenencia a Argentina y solo entonces consultan los polígonos originales; fuera del contorno no muestran ningún nivel. El verde sigue siendo una convención de fondo y puede incluir zonas no evaluadas, como se aclara en el pie del visor.
+
+Las seis etiquetas tienen anclas interiores verificadas contra las mismas geometrías y posiciones comprobadas dentro del encuadre, incluido el halo. Chile se escribe en dirección norte-sur para ajustarse a su territorio estrecho. Todas se dibujan después de los datos meteorológicos, con halo claro.
 
 Los cuatro `referencia_provincias_*.geojson` utilizados por el clasificador **permanecen intactos**: modificar esa máscara alteraría el procesamiento meteorológico. Tampoco cambian umbrales, regiones, cálculos, navegación, identidad FAA ni formato de publicación. `generar-productos-multimodelo.yml` no se modifica.
 
@@ -32,6 +34,7 @@ El generador verifica los hashes de ambas fuentes antes de generar. No descarga 
 
 ```sh
 node web/monitoreo-extremo/tests/geography.test.cjs
+node web/monitoreo-extremo/tests/vigilance.test.cjs
 python web/monitoreo-extremo/tests/topology.py
 python web/monitoreo-extremo/tests/visual.py \
   --zip /ruta/monitoreo-extremo.zip \
@@ -41,6 +44,8 @@ python web/monitoreo-extremo/tests/visual.py \
 
 La prueba geográfica comprueba el dominio completo, la transformación inversa, seis localidades reales de control, un punto del Atlántico y las fuentes. La prueba topológica comprueba la validez de las 24 geometrías derivadas y la coincidencia exacta de la unión provincial con el contorno nacional.
 
-La prueba visual levanta un servidor temporal y usa Chromium/Playwright. Carga el ZIP a través de las mismas solicitudes automáticas del visor, verifica seis capas, cuatro mapas por día, navegación y tooltips de precipitación y de polígonos de vigilancia. Compara todas las coordenadas y propiedades originales antes y después de navegar. `--baseline-html` permite comparar un HTML original; `--synthetic` identifica explícitamente pruebas sintéticas.
+La prueba visual levanta un servidor temporal y usa Chromium/Playwright. Carga el ZIP a través de las mismas solicitudes automáticas del visor, verifica seis capas, cuatro mapas por día, navegación y tooltips de precipitación y de polígonos de vigilancia. Compara todas las coordenadas y propiedades originales antes y después de navegar. También comprueba la pertenencia territorial y el encuadre de las etiquetas, y el clipping mediante comparación de píxeles con una capa de regresión deliberadamente sobredimensionada. Esa capa de prueba no reemplaza los datos reales usados en las capturas. El ZIP real se verifica por SHA-256 y ciclo para impedir una sustitución silenciosa. `--baseline-html` permite comparar un HTML original; `--synthetic` identifica explícitamente pruebas sintéticas.
 
 Las [capturas y resultados de revisión](../../docs/cartografia-monitoreo-extremo/README.md) usan el ZIP real publicado del **9 de octubre de 2026, 12 UTC**, con **26.616 registros y seis capas**. No se desplegó el sitio ni se integró la rama a `master`.
+
+La exclusión sigue exactamente el polígono territorial IGN/Georef, cuya delimitación administrativa puede incluir aguas jurisdiccionales del Río de la Plata. No es una máscara de tierra seca. También subsisten las diferencias de escala IGN/Natural Earth y la regionalización meteorológica provisional, que esta corrección no altera.
