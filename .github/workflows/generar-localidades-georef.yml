@@ -1,0 +1,38 @@
+name: Actualizar localidades GeoRef para visor (desarrollo)
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/georef-localidades-visor
+    paths:
+      - .github/workflows/generar-localidades-georef.yml
+      - web/monitoreo-extremo/tools/actualizar_localidades_georef.py
+
+permissions:
+  contents: write
+
+jobs:
+  generar_snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Descargar listado completo GeoRef, verificar y compactar
+        run: python web/monitoreo-extremo/tools/actualizar_localidades_georef.py
+      - name: Versionar snapshot oficial para GitHub Pages
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add web/monitoreo-extremo/localidades-georef.json
+          if ! git diff --cached --quiet; then
+            git commit -m "Incorporar snapshot oficial de localidades GeoRef"
+            git push origin HEAD:feature/georef-localidades-visor
+          else
+            echo "El snapshot no cambió"
+          fi
