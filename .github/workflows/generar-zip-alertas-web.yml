@@ -232,6 +232,20 @@ jobs:
           base=Path('web/monitoreo-extremo/base-cartography.js')
           assert base.is_file(), 'Falta la cartografía base versionada'
           (sitio/'base-cartography.js').write_bytes(base.read_bytes())
+          georef_script=Path('web/monitoreo-extremo/localidades-layer.js')
+          georef_data=Path('web/monitoreo-extremo/localidades-georef.json')
+          assert georef_script.is_file() and georef_script.stat().st_size>1000, 'Falta la capa GeoRef'
+          assert georef_data.is_file(), 'Falta el snapshot de localidades GeoRef'
+          localidades=json.loads(georef_data.read_text(encoding='utf-8'))
+          rows=localidades['localidades']
+          assert localidades['fuente'].startswith('GeoRef Argentina')
+          assert len(rows)>=3000 and len(rows)==localidades['total']
+          assert len({r[2] for r in rows})>=20
+          assert all(len(r)>=5 and -86<=r[3]<=-44 and -56<=r[4]<=-19 for r in rows)
+          assert '<script src="localidades-layer.js"></script>' in html
+          for asset in (georef_script,georef_data):
+              (sitio/asset.name).write_bytes(asset.read_bytes())
+          print('Localidades GeoRef publicadas:',len(rows))
           (sitio/'.nojekyll').write_text('',encoding='utf-8')
           with zipfile.ZipFile(datos/'monitoreo-extremo.zip','w',
                                compression=zipfile.ZIP_DEFLATED,compresslevel=6) as z:
