@@ -37,6 +37,12 @@ footer{margin:26px 0 0;font-size:12px;color:#536c81;line-height:1.5}
 .dayArrow:hover:not(:disabled){background:#104ea5}.dayArrow:focus-visible{outline:3px solid #76c8ed;outline-offset:3px}.dayArrow:disabled{background:#dbe2eb;color:#6b829a;cursor:not-allowed}
 .dayInfo{text-align:center;display:flex;flex-direction:column;justify-content:center;gap:2px}.dayInfo strong{font-size:17px;color:#00246b}.dayInfo small{font-size:12px;color:#52687c}
 @media(max-width:600px){.dayNav{padding:10px 8px;gap:4px;top:0}.dayArrow{padding:10px 8px;min-width:94px;font-size:12px}.dayInfo strong{font-size:14px}.dayInfo small{font-size:10px}}
+.mapzoomtools{display:flex;justify-content:flex-end;align-items:center;gap:6px;padding:6px 12px;background:#f6f9fd;border-bottom:1px solid #dbe6f1;user-select:none}
+.mapzoomtools button{border:1px solid #bed0e0;border-radius:7px;background:white;color:#00246b;min-width:32px;min-height:29px;padding:3px 8px;font-size:14px;font-weight:750;cursor:pointer}
+.mapzoomtools button:hover:not(:disabled){background:#e2f0ff}
+.mapzoomtools button:disabled{opacity:.4;cursor:default}
+.mapzoomtools button:focus-visible{outline:2px solid #2186c9;outline-offset:2px}
+.mapzoomtools .zoompercent{min-width:38px;text-align:right;font-size:11px;color:#42627e;font-variant-numeric:tabular-nums}
 </style>
 </head>
 <body>
@@ -53,12 +59,12 @@ footer{margin:26px 0 0;font-size:12px;color:#536c81;line-height:1.5}
   <button type="button" id="nextDay" class="dayArrow" aria-label="Ver día siguiente">Día siguiente &#8594;</button>
 </nav>
 <div id="alerts" style="display:none">
-<div class="sectionhead"><h2>Vigilancia meteorológica — Argentina</h2><p>Mapas de lluvia y viento para el período elegido. Fondo verde uniforme; amarillo, naranja y rojo señalan superaciones de umbrales. Cartografía regional digitalizada del SMN, pendiente de validación. <b>Producto experimental, no constituye una alerta oficial.</b></p></div>
+<div class="sectionhead"><h2>Vigilancia meteorológica — Argentina</h2><p>Vigilancia experimental de lluvia y viento basada en el análisis conjunto de los pronósticos GFS y ECMWF y su comparación con umbrales regionales de referencia. Amarillo, naranja y rojo identifican niveles estimados. <b>No constituye una alerta meteorológica oficial.</b></p></div>
 <div class="legend alertLegend" id="alertLegend"></div><div class="mapgrid alertGrid" id="alertGrid"></div>
 </div>
 <div class="sectionhead"><h2>Precipitación prevista — GFS y ECMWF</h2><p>Acumulado de lluvia en 24 horas, comparable entre modelos. La intensidad está expresada en milímetros; los colores no corresponden a niveles de alerta.</p></div>
 <div class="legend" id="rainLegend"></div><div class="mapgrid" id="rainGrid"></div>
-<footer><b>Producto experimental:</b> resultados de modelos numéricos, no alertas meteorológicas oficiales. Dominio procesado: 20–55° S / 85–45° O. Las regiones de umbrales se han digitalizado provisionalmente desde los mapas del SMN 2024 y requieren verificación cartográfica. Verde uniforme en Argentina: convención gráfica que también incluye zonas sin evaluación; no constituye garantía de ausencia de riesgo. Cartografía base: IGN/Georef (Argentina y provincias) y Natural Earth 1:10m (países vecinos); los colores no constituyen alertas oficiales. Las coordenadas y valores proceden del archivo cargado; no se simulan datos meteorológicos en pantalla.</footer>
+<footer><b>Sobre el monitoreo:</b> Comparación de pronósticos GFS y ECMWF con umbrales regionales de referencia todavía en validación. El verde es un fondo gráfico y puede incluir zonas sin evaluación; no garantiza ausencia de riesgo. <b>Producto experimental, no sustituye las alertas meteorológicas oficiales del SMN.</b> Cartografía: IGN/Georef y Natural Earth.</footer>
 </div>
 </main><div id="tip"></div>
 <script src="base-cartography.js"></script>
@@ -118,14 +124,100 @@ async function unzip(buffer){const arr=new Uint8Array(buffer),view=new DataView(
 function status(msg,kind){$('state').textContent=msg;$('state').className=kind||'';}
 function addLegend(kind){const box=$(kind==='wind'?'windLegend':'rainLegend');box.replaceChildren();cols[kind].forEach(([title,hex])=>{const e=document.createElement('div');e.className='legendItem';const sw=document.createElement('span');sw.className='swatch';sw.style.background=hex;const t=document.createElement('span');t.textContent=title+(kind==='wind'?' km/h':' mm');e.append(sw,t);box.append(e)})}
 function pointValue(r,kind){return kind==='wind'?r.wind:r.rain;}
+
+/* Per-map zoom: the PNG-like base canvas is kept immutable; only display pixels are magnified. */
+function canvasPoint(canvas,e){
+ const b=canvas.getBoundingClientRect();
+ return [(e.clientX-b.left)*W/b.width,(e.clientY-b.top)*H/b.height];
+}
+function canvasMapPosition(canvas,e){
+ const [x,y]=canvasPoint(canvas,e),z=canvas._mapZoom;
+ return z?[z.cx+(x-W/2)/z.factor,z.cy+(y-H/2)/z.factor]:[x,y];
+}
+function attachMapZoom(canvas,card){
+ const original=document.createElement('canvas');
+ original.width=canvas.width;original.height=canvas.height;
+ original.getContext('2d').drawImage(canvas,0,0);
+ const dpr=canvas.width/W,z={factor:1,cx:W/2,cy:H/2,drag:null};
+ canvas._mapZoom=z;
+ const group=document.createElement('div');
+ group.className='mapzoomtools';group.setAttribute('role','group');
+ group.setAttribute('aria-label','Zoom independiente del mapa');
+ const button=(caption,label)=>{
+  const b=document.createElement('button');
+  b.type='button';b.textContent=caption;b.title=label;b.setAttribute('aria-label',label);
+  group.append(b);return b;
+ };
+ const closer=button('+','Acercar mapa');
+ const farther=button('−','Alejar mapa');
+ const reset=button('Ajustar','Restablecer encuadre completo');
+ const status=document.createElement('span');status.className='zoompercent';
+ status.setAttribute('aria-live','polite');group.append(status);
+ card.insertBefore(group,canvas);
+ function clampCenter(){
+  const mx=W/(2*z.factor),my=H/(2*z.factor);
+  z.cx=Math.max(mx,Math.min(W-mx,z.cx));
+  z.cy=Math.max(my,Math.min(H-my,z.cy));
+ }
+ function render(){
+  clampCenter();
+  const sw=W/z.factor,sh=H/z.factor,ctx=canvas.getContext('2d');
+  ctx.setTransform(1,0,0,1,0,0);
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.imageSmoothingEnabled=true;
+  ctx.drawImage(original,(z.cx-sw/2)*dpr,(z.cy-sh/2)*dpr,
+    sw*dpr,sh*dpr,0,0,canvas.width,canvas.height);
+  status.textContent=Math.round(z.factor*100)+'%';
+  closer.disabled=z.factor>=5.999;farther.disabled=z.factor<=1.001;
+  reset.disabled=z.factor<=1.001;
+  canvas.style.touchAction=z.factor>1.001?'none':'pan-y';
+  canvas.style.cursor=z.factor>1.001?'grab':'crosshair';
+ }
+ function changeZoom(target,x=W/2,y=H/2){
+  const next=Math.min(6,Math.max(1,target));
+  const ax=z.cx+(x-W/2)/z.factor,ay=z.cy+(y-H/2)/z.factor;
+  z.cx=ax-(x-W/2)/next;z.cy=ay-(y-H/2)/next;z.factor=next;
+  render();$('tip').style.display='none';
+ }
+ closer.addEventListener('click',()=>changeZoom(z.factor*1.5));
+ farther.addEventListener('click',()=>changeZoom(z.factor/1.5));
+ reset.addEventListener('click',()=>changeZoom(1));
+ canvas.addEventListener('wheel',e=>{
+  if(e.cancelable)e.preventDefault();
+  const [px,py]=canvasPoint(canvas,e);
+  changeZoom(z.factor*(e.deltaY<0?1.25:.8),px,py);
+ },{passive:false});
+ canvas.addEventListener('pointerdown',e=>{
+  if(z.factor<=1.001||e.button!==0)return;
+  const box=canvas.getBoundingClientRect();
+  z.drag={id:e.pointerId,x:e.clientX,y:e.clientY,cx:z.cx,cy:z.cy,
+    width:box.width,height:box.height};
+  canvas.setPointerCapture(e.pointerId);
+  canvas.style.cursor='grabbing';$('tip').style.display='none';
+ });
+ canvas.addEventListener('pointermove',e=>{
+  const d=z.drag;if(!d||d.id!==e.pointerId)return;
+  z.cx=d.cx-(e.clientX-d.x)*W/(d.width*z.factor);
+  z.cy=d.cy-(e.clientY-d.y)*H/(d.height*z.factor);
+  render();canvas.style.cursor='grabbing';$('tip').style.display='none';
+ });
+ const release=e=>{
+  if(!z.drag||z.drag.id!==e.pointerId)return;
+  z.drag=null;canvas.style.cursor=z.factor>1.001?'grab':'crosshair';
+  if(canvas.hasPointerCapture(e.pointerId))canvas.releasePointerCapture(e.pointerId);
+ };
+ for(const evt of ['pointerup','pointercancel','lostpointercapture'])
+  canvas.addEventListener(evt,release);
+ render();
+}
+
 function drawOne(canvas,rows,kind){const ctx=canvas.getContext('2d');const sc=window.devicePixelRatio||1;canvas.width=Math.round(W*sc);canvas.height=Math.round(H*sc);ctx.setTransform(sc,0,0,sc,0,0);ctx.clearRect(0,0,W,H);ctx.fillStyle='#aeddf2';ctx.fillRect(0,0,W,H);drawCountries(ctx);
 // Dibujar únicamente puntos de grilla del modelo (0,25°), sin malla ni marcadores oscuros.
 for(const punto of rows){const [x,y]=proj(punto.lon,punto.lat);ctx.fillStyle=color(pointValue(punto,kind),kind);ctx.beginPath();ctx.arc(x,y,2.3,0,Math.PI*2);ctx.fill();}
-ctx.restore();
 drawProvinces(ctx);drawArgentinaOutline(ctx);drawCountryNames(ctx);
-canvas.onmousemove=e=>{const rect=canvas.getBoundingClientRect(),x=(e.clientX-rect.left)*W/rect.width,y=(e.clientY-rect.top)*H/rect.height,[lon,lat]=unproj(x,y);let best=null,dmin=Infinity;for(const r of rows){const d=(r.lat-lat)**2+(r.lon-lon)**2;if(d<dmin){dmin=d;best=r}}let tip=$('tip');if(best&&dmin<.4){tip.style.display='block';tip.style.left=Math.min(window.innerWidth-270,e.clientX+14)+'px';tip.style.top=Math.max(10,e.clientY-74)+'px';const n=v=>Number.isFinite(v)?v.toFixed(1):'sin dato';tip.textContent=best.model+'  f'+String(best.lead).padStart(3,'0')+'\n'+best.lat.toFixed(2)+'° / '+best.lon.toFixed(2)+'°\nLluvia: '+n(best.rain)+' mm ('+(Number.isFinite(best.window)?best.window+' h':'intervalo no validado')+')';}else tip.style.display='none';};canvas.onmouseleave=()=>{$('tip').style.display='none'};
+canvas.onmousemove=e=>{if(canvas._mapZoom?.drag)return;const [x,y]=canvasMapPosition(canvas,e),[lon,lat]=unproj(x,y);let best=null,dmin=Infinity;for(const r of rows){const d=(r.lat-lat)**2+(r.lon-lon)**2;if(d<dmin){dmin=d;best=r}}let tip=$('tip');if(best&&dmin<.4){tip.style.display='block';tip.style.left=Math.min(window.innerWidth-270,e.clientX+14)+'px';tip.style.top=Math.max(10,e.clientY-74)+'px';const n=v=>Number.isFinite(v)?v.toFixed(1):'sin dato';tip.textContent=best.model+'  f'+String(best.lead).padStart(3,'0')+'\n'+best.lat.toFixed(2)+'° / '+best.lon.toFixed(2)+'°\nLluvia: '+n(best.rain)+' mm ('+(Number.isFinite(best.window)?best.window+' h':'intervalo no validado')+')';}else tip.style.display='none';};canvas.onmouseleave=()=>{$('tip').style.display='none'};
 }
-function createCard(model,lead,kind,rows){const card=document.createElement('article');card.className='mapcard';const head=document.createElement('div');head.className='maphead';const h=document.createElement('strong');h.textContent=(model==='GFS'?'GFS':'ECMWF (europeo)')+' · +'+lead+' h';const w=rows.find(r=>Number.isFinite(r.window));const minor=document.createElement('small');minor.textContent=kind==='rain'?(w?'Acumulado de '+w.window+' h':'Sin intervalo de lluvia verificado'):'Viento previsto (km/h)';head.append(h,minor);const can=document.createElement('canvas');can.className='mapcanvas';can.setAttribute('aria-label',model+' plazo '+lead+' mapa '+kind);const foot=document.createElement('div');foot.className='mapfoot';foot.textContent=rows.length.toLocaleString('es-AR')+' puntos · Validez: '+(rows[0]?.valid||'desconocida')+' UTC. Pasá el cursor sobre los puntos para consultar los valores.';card.append(head,can,foot);drawOne(can,rows,kind);return card;}
+function createCard(model,lead,kind,rows){const card=document.createElement('article');card.className='mapcard';const head=document.createElement('div');head.className='maphead';const h=document.createElement('strong');h.textContent=(model==='GFS'?'GFS':'ECMWF (europeo)')+' · +'+lead+' h';const w=rows.find(r=>Number.isFinite(r.window));const minor=document.createElement('small');minor.textContent=kind==='rain'?(w?'Acumulado de '+w.window+' h':'Sin intervalo de lluvia verificado'):'Viento previsto (km/h)';head.append(h,minor);const can=document.createElement('canvas');can.className='mapcanvas';can.setAttribute('aria-label',model+' plazo '+lead+' mapa '+kind);const foot=document.createElement('div');foot.className='mapfoot';foot.textContent=rows.length.toLocaleString('es-AR')+' puntos · Validez: '+(rows[0]?.valid||'desconocida')+' UTC. Pasá el cursor sobre los puntos para consultar los valores.';card.append(head,can,foot);drawOne(can,rows,kind);attachMapZoom(can,card);return card;}
 function updateDayControls(){const lead=dayLeads[currentDay];const dateText=csvRows.find(r=>r.lead===lead&&r.valid)?.valid||'';
 $('dayTitle').textContent='Día '+(currentDay+1)+' de 3';
 $('dayRange').textContent='Pronóstico '+(lead-24)+'–'+lead+' h'+(dateText?' · Validez '+dateText.replace('T',' ').replace(/Z$/, ' UTC'): '');
@@ -206,8 +298,8 @@ for(const feat of layer.features){
 ctx.restore();
 drawProvinces(ctx);drawArgentinaOutline(ctx);drawCountryNames(ctx);
 canvas.onmousemove=e=>{
- const rect=canvas.getBoundingClientRect();
- const x=(e.clientX-rect.left)*W/rect.width,y=(e.clientY-rect.top)*H/rect.height;
+ if(canvas._mapZoom?.drag)return;
+ const [x,y]=canvasMapPosition(canvas,e);
  const [lon,lat]=unproj(x,y);
  const nivel=nivelVigilancia(lon,lat,layer),tip=$('tip');
  if(!nivel){tip.style.display='none';return;}
@@ -220,7 +312,7 @@ canvas.onmouseleave=()=>$('tip').style.display='none';
 }
 function drawAlerts(){const keys=Object.keys(alertFeatures);$('alerts').style.display=keys.length?'block':'none';if(!keys.length)return;
 const leg=$('alertLegend');leg.replaceChildren();for(const [nombre,color] of [['Verde','#49c98e'],['Amarillo','#f6d44e'],['Naranja','#f38b3b'],['Rojo','#d84e5e']]){const e=document.createElement('span');e.className='legendItem';const sw=document.createElement('i');sw.className='swatch';sw.style.background=color;const label=document.createElement('span');label.textContent=nombre;e.append(sw,label);leg.append(e);} 
-const dst=$('alertGrid');dst.replaceChildren();const lead=dayLeads[currentDay];for(const fen of ['lluvia','viento']){const layer=alertFeatures[fen+'_'+lead+'h'];if(!layer)continue;const card=document.createElement('article');card.className='mapcard';const head=document.createElement('div');head.className='maphead';const title=document.createElement('strong');title.textContent=(fen==='lluvia'?'VIGILANCIA POR LLUVIA':'VIGILANCIA POR VIENTO')+' · '+(lead-24)+'–'+lead+' h';const sub=document.createElement('small');sub.textContent='GFS + ECMWF · Experimental';head.append(title,sub);const can=document.createElement('canvas');can.className='mapcanvas';const foot=document.createElement('div');foot.className='mapfoot';foot.textContent='Fondo verde uniforme · ' + layer.features.filter(f=>['AMARILLO','NARANJA','ROJO'].includes((f.properties?.nivel||'').toUpperCase())).length +' polígonos de superación de umbrales · No operativo';card.append(head,can,foot);dst.append(card);drawAlertMap(can,layer,fen);}}
+const dst=$('alertGrid');dst.replaceChildren();const lead=dayLeads[currentDay];for(const fen of ['lluvia','viento']){const layer=alertFeatures[fen+'_'+lead+'h'];if(!layer)continue;const card=document.createElement('article');card.className='mapcard';const head=document.createElement('div');head.className='maphead';const title=document.createElement('strong');title.textContent=(fen==='lluvia'?'VIGILANCIA POR LLUVIA':'VIGILANCIA POR VIENTO')+' · '+(lead-24)+'–'+lead+' h';const sub=document.createElement('small');sub.textContent='GFS + ECMWF · Experimental';head.append(title,sub);const can=document.createElement('canvas');can.className='mapcanvas';const foot=document.createElement('div');foot.className='mapfoot';foot.textContent='Análisis GFS + ECMWF · '+layer.features.filter(f=>['AMARILLO','NARANJA','ROJO'].includes((f.properties?.nivel||'').toUpperCase())).length+' áreas de vigilancia coloreadas · Producto experimental';card.append(head,can,foot);dst.append(card);drawAlertMap(can,layer,fen);attachMapZoom(can,card);}}
 async function cargarPublicacionAutomatica(){
   status('Consultando la última publicación meteorológica válida…');
   try{
