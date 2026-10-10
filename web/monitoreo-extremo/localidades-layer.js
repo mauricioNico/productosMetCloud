@@ -62,7 +62,7 @@
     canvas._placeHits=[];
     if(!state.ready||!state.visible||!state.items.length||!state.proj)return;
     const W=state.W,H=state.H;
-    const groups=groupPoints(state.items,z,W,H);
+    const groups=[]; // Solo se dibuja la localidad elegida en el buscador.
     const ratio=canvas.width/W;
     ctx.save();ctx.setTransform(ratio,0,0,ratio,0,0);
     ctx.textAlign='center';ctx.textBaseline='middle';
@@ -79,7 +79,7 @@
       }else singles.push(group);
       canvas._placeHits.push({x,y,r:radius+5,group});
     }
-    if(state.labels && z.factor>=1.7){
+    if(false && state.labels && z.factor>=1.7){
       // Label budget rises with zoom; bbox avoidance keeps the map legible.
       const limit=z.factor<2.5?14:z.factor<3.8?32:z.factor<5?65:105;
       const selected=state.selected;
@@ -111,6 +111,12 @@
       const pos=state.proj(state.selected.lon,state.selected.lat);
       const x=W/2+(pos[0]-z.cx)*z.factor,y=H/2+(pos[1]-z.cy)*z.factor;
       if(x>=-15&&x<=W+15&&y>=-15&&y<=H+15){
+        ctx.font='bold 12px system-ui';ctx.textAlign='left';ctx.textBaseline='middle';
+        const label=state.selected.name+' · '+state.selected.province;
+        const labelX=Math.min(W-ctx.measureText(label).width-12,Math.max(12,x+13));
+        const labelY=Math.max(15,Math.min(H-15,y-12));
+        ctx.lineWidth=4;ctx.strokeStyle='#fff';ctx.strokeText(label,labelX,labelY);
+        ctx.fillStyle='#123f72';ctx.fillText(label,labelX,labelY);
         ctx.beginPath();ctx.arc(x,y,8,0,2*Math.PI);
         ctx.strokeStyle='#ffffff';ctx.lineWidth=4;ctx.stroke();
         ctx.beginPath();ctx.arc(x,y,7,0,2*Math.PI);
