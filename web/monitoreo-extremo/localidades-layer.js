@@ -175,6 +175,10 @@
   function renderAll(){
     for(const canvas of canvases())canvas._mapZoom?.render?.();
   }
+  function focusCurrent(canvas){
+    if(state.selected&&canvas._mapZoom?.focus)
+      canvas._mapZoom.focus(state.selected.lon,state.selected.lat,3.3);
+  }
 
   function closeSuggestions(){
     const results=$('placeSuggestions');if(results){results.replaceChildren();results.hidden=true;}
@@ -184,7 +188,8 @@
   function searchResults(query){
     const key=normalize(query);
     if(key.length<2)return [];
-    const matches=state.items.filter(item=>item.norm.includes(key)||item.regionNorm.includes(key)&&item.norm.includes(key.split(' ')[0]));
+    const tokens=key.replace(/[—–,]/g,' ').split(/\s+/).filter(Boolean);
+    const matches=state.items.filter(item=>tokens.every(token=>(item.norm+' '+item.regionNorm).includes(token)));
     const score=item=>(item.norm===key?0:item.norm.startsWith(key)?1:2)+
       (item.category==='Entidad'?0.25:0);
     matches.sort((a,b)=>score(a)-score(b)||
@@ -252,5 +257,5 @@
       });
   }
 
-  window.GeoRefPlaces={init,draw,hover,click,renderAll,normalize,decode,groupPoints,searchResults};
+  window.GeoRefPlaces={init,draw,hover,click,renderAll,focusCurrent,normalize,decode,groupPoints,searchResults};
 })();
