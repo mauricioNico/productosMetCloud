@@ -8,6 +8,9 @@ on:
     paths:
       - .github/workflows/generar-localidades-georef.yml
       - web/monitoreo-extremo/tools/actualizar_localidades_georef.py
+      - web/monitoreo-extremo/tests/localidades.test.cjs
+      - web/monitoreo-extremo/localidades-layer.js
+      - web/monitoreo-extremo/index.html
 
 permissions:
   contents: write
