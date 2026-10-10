@@ -1,0 +1,21 @@
+{
+  "estado": "PUBLICADO",
+  "ciclo_utc": "2026-10-09T12:00:00Z",
+  "publicado_utc": "2026-10-09T23:58:55Z",
+  "modelos": [
+    "ECMWF",
+    "GFS"
+  ],
+  "registros": 26616,
+  "capas_geojson": 6,
+  "dominio": {
+    "south": -55,
+    "north": -20,
+    "west": -85,
+    "east": -45
+  },
+  "publicacion_autorizada": false,
+  "tipo": "MONITOREO_EXPERIMENTAL_NO_OPERATIVO",
+  "fuente_workflow": "Monitoreo extremo",
+  "sha_codigo": "cb61b57daebfaf1130e66c57288acc71e4965d19"
+}

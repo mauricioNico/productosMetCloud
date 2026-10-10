@@ -229,6 +229,9 @@ jobs:
           assert cnt>1000 and modelos=={'GFS','ECMWF'} and plazos=={24,48,72}
           assert ciclos=={m['run_time']}, 'CSV y metadatos pertenecen a corridas diferentes'
           (sitio/'index.html').write_text(html,encoding='utf-8')
+          base=Path('web/monitoreo-extremo/base-cartography.js')
+          assert base.is_file(), 'Falta la cartografía base versionada'
+          (sitio/'base-cartography.js').write_bytes(base.read_bytes())
           (sitio/'.nojekyll').write_text('',encoding='utf-8')
           with zipfile.ZipFile(datos/'monitoreo-extremo.zip','w',
                                compression=zipfile.ZIP_DEFLATED,compresslevel=6) as z:

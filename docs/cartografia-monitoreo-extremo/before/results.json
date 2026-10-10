@@ -1,0 +1,10 @@
+{
+  "input": "/workspace/.onboarding/evidence/real.zip",
+  "synthetic": false,
+  "cycle": "2026-10-09T12:00:00Z",
+  "days_checked": 3,
+  "maps_per_day": 4,
+  "original_alert_polygons_preserved": true,
+  "javascript_errors": [],
+  "baseline": true
+}
