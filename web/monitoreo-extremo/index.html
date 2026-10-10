@@ -43,6 +43,23 @@ footer{margin:26px 0 0;font-size:12px;color:#536c81;line-height:1.5}
 .mapzoomtools button:disabled{opacity:.4;cursor:default}
 .mapzoomtools button:focus-visible{outline:2px solid #2186c9;outline-offset:2px}
 .mapzoomtools .zoompercent{min-width:38px;text-align:right;font-size:11px;color:#42627e;font-variant-numeric:tabular-nums}
+.placebar{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;margin-top:15px;padding:11px 13px;border:1px solid #d5e4f0;border-radius:12px;background:#f7fbff}
+.placecheck{display:flex;align-items:center;gap:6px;white-space:nowrap;font-size:13px;color:#244861;cursor:pointer}
+.placecheck input{accent-color:#00246b}
+.placefinder{position:relative;display:flex;align-items:center;gap:8px;flex:1 1 285px;min-width:195px}
+.placefinder>label{white-space:nowrap;font-size:12px;color:#365673;font-weight:650}
+.placefinder input{min-width:0;width:100%;border:1px solid #aebfd3;background:white;border-radius:8px;padding:9px 11px;font-size:13px}
+.placefinder input:focus{outline:2px solid #397eb5;outline-offset:1px}
+.placesuggestions{position:absolute;top:calc(100% + 5px);right:0;width:min(100%,370px);max-height:270px;overflow:auto;background:#fff;border:1px solid #adbfce;border-radius:9px;box-shadow:0 12px 26px #10375830;z-index:45}
+.placesuggestions[hidden]{display:none}
+.placeoption{background:white;border:0;border-bottom:1px solid #edf1f5;text-align:left;padding:9px 12px;width:100%;display:flex;justify-content:space-between;align-items:center;gap:10px;cursor:pointer;color:#183c58}
+.placeoption:hover,.placeoption:focus-visible{background:#e9f4ff;outline:none}
+.placeoption strong{font-size:13px}.placeoption small{color:#536d85;font-size:11px}
+.placeempty{font-size:12px;padding:10px;color:#567}
+.placeclear{border:1px solid #bacbda;border-radius:8px;background:white;color:#174668;padding:8px 11px;cursor:pointer;font-size:12px}
+.placeclear:disabled{opacity:.5;cursor:default}
+#placesStatus{color:#567287;font-size:11px;width:100%}
+@media(max-width:660px){.placefinder{flex-basis:100%}.placefinder>label{display:none}}
 </style>
 </head>
 <body>
@@ -51,7 +68,19 @@ footer{margin:26px 0 0;font-size:12px;color:#536c81;line-height:1.5}
 <section class="intro"><h1>Monitoreo de eventos extremos</h1>
 <p class="muted">Mapas de <b>GFS y ECMWF</b> actualizados automáticamente. Elegir el día para ver los mapas de vigilancia y la precipitación prevista por GFS y ECMWF.</p>
 <div id="state" role="status" aria-live="polite">Conectando con la última corrida publicada…</div>
-<div id="summary"></div></section>
+<div id="summary"></div>
+<div class="placebar" aria-label="Localidades georreferenciadas">
+ <label class="placecheck"><input id="showPlaces" type="checkbox" checked> Localidades</label>
+ <label class="placecheck"><input id="showPlaceLabels" type="checkbox" checked> Etiquetas según zoom</label>
+ <div class="placefinder">
+  <label for="placeSearch">Buscar localidad</label>
+  <input id="placeSearch" type="search" placeholder="Ej.: La Plata, Tandil, Río Cuarto" autocomplete="off"
+    role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="placeSuggestions">
+  <div id="placeSuggestions" class="placesuggestions" role="listbox" hidden></div>
+ </div>
+ <button id="placeClear" class="placeclear" type="button" disabled>Limpiar selección</button>
+ <small id="placesStatus" role="status" aria-live="polite">Cargando localidades…</small>
+</div></section>
 <div id="results">
 <nav id="dayNav" class="dayNav" aria-label="Navegación de pronóstico diario">
   <button type="button" id="prevDay" class="dayArrow" aria-label="Ver día anterior">&#8592; Día anterior</button>
@@ -68,6 +97,7 @@ footer{margin:26px 0 0;font-size:12px;color:#536c81;line-height:1.5}
 </div>
 </main><div id="tip"></div>
 <script src="base-cartography.js"></script>
+<script src="localidades-layer.js"></script>
 <script>
 'use strict';
 const countries=BASE_CARTOGRAPHY.countries;
@@ -167,12 +197,21 @@ function attachMapZoom(canvas,card){
   ctx.imageSmoothingEnabled=true;
   ctx.drawImage(original,(z.cx-sw/2)*dpr,(z.cy-sh/2)*dpr,
     sw*dpr,sh*dpr,0,0,canvas.width,canvas.height);
+  window.GeoRefPlaces?.draw(canvas,ctx,z);
   status.textContent=Math.round(z.factor*100)+'%';
   closer.disabled=z.factor>=5.999;farther.disabled=z.factor<=1.001;
   reset.disabled=z.factor<=1.001;
   canvas.style.touchAction=z.factor>1.001?'none':'pan-y';
   canvas.style.cursor=z.factor>1.001?'grab':'crosshair';
  }
+ z.render=render;
+ z.focusProjected=(px,py,scale)=>{
+  z.factor=Math.max(1,Math.min(6,scale));
+  z.cx=px;z.cy=py;render();$('tip').style.display='none';
+ };
+ z.focus=(lon,lat,scale)=>{
+  const xy=proj(lon,lat);z.focusProjected(xy[0],xy[1],scale);
+ };
  function changeZoom(target,x=W/2,y=H/2){
   const next=Math.min(6,Math.max(1,target));
   const ax=z.cx+(x-W/2)/z.factor,ay=z.cy+(y-H/2)/z.factor;
@@ -190,6 +229,7 @@ function attachMapZoom(canvas,card){
  canvas.addEventListener('pointerdown',e=>{
   if(z.factor<=1.001||e.button!==0)return;
   const box=canvas.getBoundingClientRect();
+  canvas._suppressPlaceClick=false;
   z.drag={id:e.pointerId,x:e.clientX,y:e.clientY,cx:z.cx,cy:z.cy,
     width:box.width,height:box.height};
   canvas.setPointerCapture(e.pointerId);
@@ -197,6 +237,7 @@ function attachMapZoom(canvas,card){
  });
  canvas.addEventListener('pointermove',e=>{
   const d=z.drag;if(!d||d.id!==e.pointerId)return;
+  if(Math.hypot(e.clientX-d.x,e.clientY-d.y)>5)canvas._suppressPlaceClick=true;
   z.cx=d.cx-(e.clientX-d.x)*W/(d.width*z.factor);
   z.cy=d.cy-(e.clientY-d.y)*H/(d.height*z.factor);
   render();canvas.style.cursor='grabbing';$('tip').style.display='none';
@@ -208,6 +249,8 @@ function attachMapZoom(canvas,card){
  };
  for(const evt of ['pointerup','pointercancel','lostpointercapture'])
   canvas.addEventListener(evt,release);
+ canvas.addEventListener('mousemove',e=>window.GeoRefPlaces?.hover(canvas,e));
+ canvas.addEventListener('click',e=>window.GeoRefPlaces?.click(canvas,e));
  render();
 }
 
@@ -342,7 +385,8 @@ async function cargarPublicacionAutomatica(){
   }
 }
 cargarPublicacionAutomatica();
-// Cartografía versionada local: funciona en ramas y sin consultas a master.
+// Cartografía y GeoRef versionados localmente: sin consultas a terceros en el navegador.
+window.GeoRefPlaces?.init({proj,W,H});
 addLegend('rain');
 </script>
 </body>
