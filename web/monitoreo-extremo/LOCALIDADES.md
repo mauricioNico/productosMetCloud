@@ -15,6 +15,8 @@ La capa se basa en el catálogo **GeoRef Argentina**, listado oficial de **local
 4. **Interacción:** clic en una agrupación acerca el mapa correspondiente; clic en un punto selecciona la localidad. Cada mapa conserva zoom independiente.
 5. **Coordenadas:** usa la misma transformación `proj()` del visor Lambert; los marcadores se posicionan y se actualizan tras cada zoom/desplazamiento, no se mueven sobre la base de un bitmap fijo.
 
+**Referencias al hacer clic:** en cualquiera de los cuatro mapas, la coordenada bajo el cursor (incluido zoom y desplazamiento) se transforma mediante la inversa de Lambert; se calcula la distancia geodésica aproximada con Haversine (radio terrestre medio 6.371,0088 km) a todos los centroides de localidades argentinas cargados desde GeoRef. El tooltip muestra «A X km de localidad (provincia)» junto con la coordenada exacta del clic y los datos meteorológicos visibles. Es una distancia **en línea recta**, no una distancia por rutas, y las coordenadas GeoRef son centroides de referencia, no ubicaciones exactas de cada edificio. Esta operación no coloca puntos adicionales en el mapa ni modifica los campos GFS/ECMWF o los niveles de vigilancia.
+
 **Interpretación meteorológica:** los marcadores identifican localidades, no son estaciones ni pronósticos puntualizados. Los valores GFS/ECMWF son datos del modelo a resolución de grilla, no observaciones. El visor es experimental, no una fuente de alertas oficiales.
 
 ## Actualización del archivo

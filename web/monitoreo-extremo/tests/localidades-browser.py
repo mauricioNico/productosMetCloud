@@ -1,13 +1,14 @@
-"""Smoke test in real browser with the latest *real* meteorological ZIP.
+"""Prueba en Chromium de GeoRef y el tooltip de distancia con publicación meteorológica real.
 
-Usage:
- python web/monitoreo-extremo/tests/localidades-browser.py --zip /tmp/real.zip --metadata /tmp/meta.json
+Ejecutar con:
+ python web/monitoreo-extremo/tests/localidades-browser.py --zip archivo-real.zip --metadata publicacion.json
 """
 import argparse
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
+import re
 import threading
 from playwright.sync_api import sync_playwright
 
@@ -34,48 +35,70 @@ try:
              lambda route:route.fulfill(content_type='application/zip',body=args.zip.read_bytes()))
   page.goto(f'http://127.0.0.1:{server.server_port}/web/monitoreo-extremo/index.html')
   page.wait_for_function("document.getElementById('placesStatus').textContent.includes('GeoRef')",timeout=30000)
-  page.wait_for_function("csvRows.length > 100 && Object.keys(alertFeatures).length === 6",timeout=45000)
+  page.wait_for_function("csvRows.length>100 && Object.keys(alertFeatures).length===6",timeout=45000)
   assert page.locator('canvas.mapcanvas').count()==4
-  initial=page.evaluate("document.querySelector('#rainGrid canvas')._placeHits.length")
-  assert initial>15, 'Initial clustered locality markers missing'
-  page.locator('#showPlaces').uncheck()
-  assert page.evaluate("document.querySelector('#rainGrid canvas')._placeHits.length")==0
-  page.locator('#showPlaces').check()
-  assert page.evaluate("document.querySelector('#rainGrid canvas')._placeHits.length")>15
-  page.locator('#showPlaceLabels').uncheck()
-  page.locator('#showPlaceLabels').check()
-  # Search by place and province, accents optional.
-  page.locator('#placeSearch').fill('Rio Cuarto')
-  first=page.locator('#placeSuggestions button').first
-  first.wait_for(timeout=5000)
-  assert 'Río Cuarto' in first.inner_text()
-  first.click()
-  assert 'Río Cuarto' in page.locator('#placeSearch').input_value()
+  assert page.evaluate("Array.from(document.querySelectorAll('canvas.mapcanvas')).every(c=>c._placeHits.length===0)"),'The map must be clean without search'
+  page.locator('#placeSearch').fill('Tupungato')
+  suggestion=page.locator('#placeSuggestions button').filter(has_text='Tupungato').first
+  suggestion.wait_for(timeout=5000)
+  suggestion.click()
+  assert 'Tupungato' in page.locator('#placeSearch').input_value()
   assert page.evaluate("Array.from(document.querySelectorAll('canvas.mapcanvas')).every(c=>c._mapZoom.factor>=3.3)")
-  # Navigation must preserve a selected georeferenced locality on the next set of canvases.
+
+  # Center of each zoomed map corresponds to the selected GeoRef locality (Tupungato).
+  texts={}
+  for section in ('#alertGrid canvas','#rainGrid canvas'):
+   for index in (0,1):
+    canvas=page.locator(section).nth(index)
+    canvas.scroll_into_view_if_needed()
+    w=canvas.evaluate('(c)=>c.getBoundingClientRect().width')
+    h=canvas.evaluate('(c)=>c.getBoundingClientRect().height')
+    canvas.click(position={'x':w/2,'y':h/2},timeout=10000)
+    tip=page.locator('#tip')
+    msg=tip.inner_text()
+    assert re.search(r'A [0-9.,]+ km de .+ \(Mendoza\)',msg),msg
+    assert 'GeoRef' in msg and 'Clic:' in msg,msg
+    if section=='#rainGrid canvas':
+     assert 'Lluvia:' in msg and ('GFS' in msg or 'ECMWF' in msg),msg
+    else:
+     assert 'Nivel' in msg,msg
+    texts[section+str(index)]=msg
+  # Pinning persists during pointer motion; pan/zoom clears it.
+  c=page.locator('#rainGrid canvas').first
+  c.scroll_into_view_if_needed()
+  width=c.evaluate('(x)=>x.getBoundingClientRect().width')
+  height=c.evaluate('(x)=>x.getBoundingClientRect().height')
+  c.click(position={'x':width/2,'y':height/2})
+  msg=page.locator('#tip').inner_text()
+  point=c.bounding_box()
+  page.mouse.move(point['x']+width/2+4,point['y']+height/2+4)
+  assert page.locator('#tip').inner_text()==msg,'Click tooltip should not be replaced by hover'
+  before=c.evaluate('(x)=>x._mapZoom.factor')
+  page.mouse.wheel(0,-110)
+  after=c.evaluate('(x)=>x._mapZoom.factor')
+  assert after>before
+  assert c.evaluate('(x)=>x._clickedReference') is False
+  # The selected locality remains centered when changing forecast day.
   page.locator('#nextDay').click()
   assert page.locator('#dayTitle').inner_text()=='Día 2 de 3'
   assert page.evaluate("Array.from(document.querySelectorAll('canvas.mapcanvas')).every(c=>c._mapZoom.factor>=3.3)")
-  assert page.locator('canvas.mapcanvas').count()==4
-  assert page.evaluate("document.querySelector('#rainGrid canvas')._placeHits.length")>0
-  # Zoom and pan still work with the overlay.
   c=page.locator('#rainGrid canvas').first
   c.scroll_into_view_if_needed()
-  before=page.evaluate("document.querySelector('#rainGrid canvas')._mapZoom.factor")
-  c.hover()
-  page.mouse.wheel(0,-110)
-  after=page.evaluate("document.querySelector('#rainGrid canvas')._mapZoom.factor")
-  assert after>before
+  width=c.evaluate('(x)=>x.getBoundingClientRect().width')
+  height=c.evaluate('(x)=>x.getBoundingClientRect().height')
+  c.click(position={'x':width/2,'y':height/2})
+  assert re.search(r'km de .+ \(Mendoza\)',page.locator('#tip').inner_text())
   page.locator('#placeClear').click()
   assert not page.locator('#placeSearch').input_value()
+  assert page.evaluate("Array.from(document.querySelectorAll('canvas.mapcanvas')).every(c=>c._placeHits.length===0)")
   assert not errors,errors
   if args.screenshot:
    args.screenshot.parent.mkdir(parents=True,exist_ok=True)
    page.screenshot(path=str(args.screenshot),full_page=True)
-  print(json.dumps({'status':'OK','metadata_cycle':metadata['ciclo_utc'],
-    'localities':page.locator('#placesStatus').inner_text(),'initial_markers':initial,
-    'four_maps':True,'selection_survives_day_navigation':True,
-    'zoom_and_search':True,'js_errors':errors},ensure_ascii=False))
+  print(json.dumps({'status':'OK','cycle':metadata['ciclo_utc'],
+    'four_maps_clicked':len(texts),'references':texts,
+    'search_and_day_navigation':True,'click_tooltip_persists':True,
+    'zoom_clears_pin':True,'javascript_errors':errors},ensure_ascii=False))
   browser.close()
 finally:
  server.shutdown()

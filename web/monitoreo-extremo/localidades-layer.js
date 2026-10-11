@@ -166,6 +166,25 @@
     }
   }
 
+  // Distancia ortodrómica aproximada (km) entre coordenadas WGS84, no distancia vial.
+  function haversineKm(lon1,lat1,lon2,lat2){
+    const rad=Math.PI/180;
+    const dlat=(lat2-lat1)*rad,dlon=(lon2-lon1)*rad;
+    const a=Math.sin(dlat/2)**2+Math.cos(lat1*rad)*Math.cos(lat2*rad)*Math.sin(dlon/2)**2;
+    return 6371.0088*2*Math.asin(Math.sqrt(Math.min(1,Math.max(0,a))));
+  }
+  // Usa los centroides oficiales GeoRef; no crea marcadores nuevos en el mapa.
+  function nearest(lon,lat){
+    if(!state.ready || !Number.isFinite(lon) || !Number.isFinite(lat))return null;
+    let result=null;
+    for(const item of state.items){
+      const km=haversineKm(lon,lat,item.lon,item.lat);
+      if(!result || km<result.km)result={id:item.id,name:item.name,
+        province:item.province,lon:item.lon,lat:item.lat,km};
+    }
+    return result;
+  }
+
   function click(canvas,e){
     if(canvas._suppressPlaceClick){canvas._suppressPlaceClick=false;return;}
     const h=hit(canvas,e);if(!h)return;
@@ -263,5 +282,5 @@
       });
   }
 
-  window.GeoRefPlaces={init,draw,hover,click,renderAll,focusCurrent,normalize,decode,groupPoints,searchResults};
+  window.GeoRefPlaces={init,draw,hover,click,renderAll,focusCurrent,normalize,decode,groupPoints,searchResults,nearest,haversineKm};
 })();
