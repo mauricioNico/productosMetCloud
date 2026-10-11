@@ -162,6 +162,26 @@ function canvasMapPosition(canvas,e){
  const [x,y]=canvasPoint(canvas,e),z=canvas._mapZoom;
  return z?[z.cx+(x-W/2)/z.factor,z.cy+(y-H/2)/z.factor]:[x,y];
 }
+// El clic corresponde a la coordenada geográfica real bajo el cursor, aun con zoom/pan.
+function showClickedMapReference(canvas,event){
+ const [px,py]=canvasMapPosition(canvas,event);
+ const [lon,lat]=unproj(px,py);
+ const nearest=window.GeoRefPlaces?.nearest(lon,lat);
+ if(!nearest)return; // GeoRef aún no cargó: mantener el tooltip meteorológico habitual.
+ const tip=$('tip');
+ canvas._clickedReference=false;
+ if(typeof canvas.onmousemove==='function')canvas.onmousemove(event);
+ const meteo=tip.style.display==='block'?tip.textContent:'Punto geográfico consultado';
+ const distance=new Intl.NumberFormat('es-AR',{minimumFractionDigits:1,maximumFractionDigits:1}).format(nearest.km);
+ tip.textContent=meteo+'\nClic: '+lat.toFixed(3)+'° / '+lon.toFixed(3)+'°'+
+   '\nA '+distance+' km de '+nearest.name+' ('+nearest.province+')'+
+   '\nDistancia aproximada en línea recta · GeoRef';
+ tip.style.display='block';
+ tip.style.left=Math.max(8,Math.min(window.innerWidth-285,event.clientX+12))+'px';
+ tip.style.top=Math.max(8,Math.min(window.innerHeight-138,event.clientY+12))+'px';
+ canvas._clickedReference=true;
+}
+
 function attachMapZoom(canvas,card){
  const original=document.createElement('canvas');
  original.width=canvas.width;original.height=canvas.height;
@@ -231,6 +251,7 @@ function attachMapZoom(canvas,card){
   z.drag={id:e.pointerId,x:e.clientX,y:e.clientY,cx:z.cx,cy:z.cy,
     width:box.width,height:box.height};
   canvas.setPointerCapture(e.pointerId);
+  canvas._clickedReference=false;
   canvas.style.cursor='grabbing';$('tip').style.display='none';
  });
  canvas.addEventListener('pointermove',e=>{
@@ -248,7 +269,11 @@ function attachMapZoom(canvas,card){
  for(const evt of ['pointerup','pointercancel','lostpointercapture'])
   canvas.addEventListener(evt,release);
  canvas.addEventListener('mousemove',e=>window.GeoRefPlaces?.hover(canvas,e));
- canvas.addEventListener('click',e=>window.GeoRefPlaces?.click(canvas,e));
+ canvas.addEventListener('click',e=>{
+  if(canvas._suppressPlaceClick){canvas._suppressPlaceClick=false;return;}
+  window.GeoRefPlaces?.click(canvas,e);
+  showClickedMapReference(canvas,e);
+ });
  render();window.GeoRefPlaces?.focusCurrent(canvas);
 }
 
@@ -256,9 +281,9 @@ function drawOne(canvas,rows,kind){const ctx=canvas.getContext('2d');const sc=wi
 // Dibujar únicamente puntos de grilla del modelo (0,25°), sin malla ni marcadores oscuros.
 for(const punto of rows){const [x,y]=proj(punto.lon,punto.lat);ctx.fillStyle=color(pointValue(punto,kind),kind);ctx.beginPath();ctx.arc(x,y,2.3,0,Math.PI*2);ctx.fill();}
 drawProvinces(ctx);drawArgentinaOutline(ctx);drawCountryNames(ctx);
-canvas.onmousemove=e=>{if(canvas._mapZoom?.drag)return;const [x,y]=canvasMapPosition(canvas,e),[lon,lat]=unproj(x,y);let best=null,dmin=Infinity;for(const r of rows){const d=(r.lat-lat)**2+(r.lon-lon)**2;if(d<dmin){dmin=d;best=r}}let tip=$('tip');if(best&&dmin<.4){tip.style.display='block';tip.style.left=Math.min(window.innerWidth-270,e.clientX+14)+'px';tip.style.top=Math.max(10,e.clientY-74)+'px';const n=v=>Number.isFinite(v)?v.toFixed(1):'sin dato';tip.textContent=best.model+'  f'+String(best.lead).padStart(3,'0')+'\n'+best.lat.toFixed(2)+'° / '+best.lon.toFixed(2)+'°\nLluvia: '+n(best.rain)+' mm ('+(Number.isFinite(best.window)?best.window+' h':'intervalo no validado')+')';}else tip.style.display='none';};canvas.onmouseleave=()=>{$('tip').style.display='none'};
+canvas.onmousemove=e=>{if(canvas._mapZoom?.drag||canvas._clickedReference)return;const [x,y]=canvasMapPosition(canvas,e),[lon,lat]=unproj(x,y);let best=null,dmin=Infinity;for(const r of rows){const d=(r.lat-lat)**2+(r.lon-lon)**2;if(d<dmin){dmin=d;best=r}}let tip=$('tip');if(best&&dmin<.4){tip.style.display='block';tip.style.left=Math.min(window.innerWidth-270,e.clientX+14)+'px';tip.style.top=Math.max(10,e.clientY-74)+'px';const n=v=>Number.isFinite(v)?v.toFixed(1):'sin dato';tip.textContent=best.model+'  f'+String(best.lead).padStart(3,'0')+'\n'+best.lat.toFixed(2)+'° / '+best.lon.toFixed(2)+'°\nLluvia: '+n(best.rain)+' mm ('+(Number.isFinite(best.window)?best.window+' h':'intervalo no validado')+')';}else tip.style.display='none';};canvas.onmouseleave=()=>{canvas._clickedReference=false;$('tip').style.display='none'};
 }
-function createCard(model,lead,kind,rows){const card=document.createElement('article');card.className='mapcard';const head=document.createElement('div');head.className='maphead';const h=document.createElement('strong');h.textContent=(model==='GFS'?'GFS':'ECMWF (europeo)')+' · +'+lead+' h';const w=rows.find(r=>Number.isFinite(r.window));const minor=document.createElement('small');minor.textContent=kind==='rain'?(w?'Acumulado de '+w.window+' h':'Sin intervalo de lluvia verificado'):'Viento previsto (km/h)';head.append(h,minor);const can=document.createElement('canvas');can.className='mapcanvas';can.setAttribute('aria-label',model+' plazo '+lead+' mapa '+kind);const foot=document.createElement('div');foot.className='mapfoot';foot.textContent=rows.length.toLocaleString('es-AR')+' puntos · Validez: '+(rows[0]?.valid||'desconocida')+' UTC. Pasá el cursor sobre los puntos para consultar los valores.';card.append(head,can,foot);drawOne(can,rows,kind);attachMapZoom(can,card);return card;}
+function createCard(model,lead,kind,rows){const card=document.createElement('article');card.className='mapcard';const head=document.createElement('div');head.className='maphead';const h=document.createElement('strong');h.textContent=(model==='GFS'?'GFS':'ECMWF (europeo)')+' · +'+lead+' h';const w=rows.find(r=>Number.isFinite(r.window));const minor=document.createElement('small');minor.textContent=kind==='rain'?(w?'Acumulado de '+w.window+' h':'Sin intervalo de lluvia verificado'):'Viento previsto (km/h)';head.append(h,minor);const can=document.createElement('canvas');can.className='mapcanvas';can.setAttribute('aria-label',model+' plazo '+lead+' mapa '+kind);const foot=document.createElement('div');foot.className='mapfoot';foot.textContent=rows.length.toLocaleString('es-AR')+' puntos · Validez: '+(rows[0]?.valid||'desconocida')+' UTC. Pasá el cursor para consultar los valores y hacé clic para ver la localidad más cercana.';card.append(head,can,foot);drawOne(can,rows,kind);attachMapZoom(can,card);return card;}
 function updateDayControls(){const lead=dayLeads[currentDay];const dateText=csvRows.find(r=>r.lead===lead&&r.valid)?.valid||'';
 $('dayTitle').textContent='Día '+(currentDay+1)+' de 3';
 $('dayRange').textContent='Pronóstico '+(lead-24)+'–'+lead+' h'+(dateText?' · Validez '+dateText.replace('T',' ').replace(/Z$/, ' UTC'): '');
@@ -339,7 +364,7 @@ for(const feat of layer.features){
 ctx.restore();
 drawProvinces(ctx);drawArgentinaOutline(ctx);drawCountryNames(ctx);
 canvas.onmousemove=e=>{
- if(canvas._mapZoom?.drag)return;
+ if(canvas._mapZoom?.drag||canvas._clickedReference)return;
  const [x,y]=canvasMapPosition(canvas,e);
  const [lon,lat]=unproj(x,y);
  const nivel=nivelVigilancia(lon,lat,layer),tip=$('tip');
@@ -349,11 +374,11 @@ canvas.onmousemove=e=>{
  tip.style.top=Math.max(10,e.clientY-55)+'px';
  tip.textContent='Nivel '+nivel.toLowerCase()+' para '+(fen==='lluvia'?'lluvia':'viento');
 };
-canvas.onmouseleave=()=>$('tip').style.display='none';
+canvas.onmouseleave=()=>{canvas._clickedReference=false;$('tip').style.display='none'};
 }
 function drawAlerts(){const keys=Object.keys(alertFeatures);$('alerts').style.display=keys.length?'block':'none';if(!keys.length)return;
 const leg=$('alertLegend');leg.replaceChildren();for(const [nombre,color] of [['Verde','#49c98e'],['Amarillo','#f6d44e'],['Naranja','#f38b3b'],['Rojo','#d84e5e']]){const e=document.createElement('span');e.className='legendItem';const sw=document.createElement('i');sw.className='swatch';sw.style.background=color;const label=document.createElement('span');label.textContent=nombre;e.append(sw,label);leg.append(e);} 
-const dst=$('alertGrid');dst.replaceChildren();const lead=dayLeads[currentDay];for(const fen of ['lluvia','viento']){const layer=alertFeatures[fen+'_'+lead+'h'];if(!layer)continue;const card=document.createElement('article');card.className='mapcard';const head=document.createElement('div');head.className='maphead';const title=document.createElement('strong');title.textContent=(fen==='lluvia'?'VIGILANCIA POR LLUVIA':'VIGILANCIA POR VIENTO')+' · '+(lead-24)+'–'+lead+' h';const sub=document.createElement('small');sub.textContent='GFS + ECMWF · Experimental';head.append(title,sub);const can=document.createElement('canvas');can.className='mapcanvas';const foot=document.createElement('div');foot.className='mapfoot';foot.textContent='Análisis GFS + ECMWF · '+layer.features.filter(f=>['AMARILLO','NARANJA','ROJO'].includes((f.properties?.nivel||'').toUpperCase())).length+' áreas de vigilancia coloreadas · Producto experimental';card.append(head,can,foot);dst.append(card);drawAlertMap(can,layer,fen);attachMapZoom(can,card);}}
+const dst=$('alertGrid');dst.replaceChildren();const lead=dayLeads[currentDay];for(const fen of ['lluvia','viento']){const layer=alertFeatures[fen+'_'+lead+'h'];if(!layer)continue;const card=document.createElement('article');card.className='mapcard';const head=document.createElement('div');head.className='maphead';const title=document.createElement('strong');title.textContent=(fen==='lluvia'?'VIGILANCIA POR LLUVIA':'VIGILANCIA POR VIENTO')+' · '+(lead-24)+'–'+lead+' h';const sub=document.createElement('small');sub.textContent='GFS + ECMWF · Experimental';head.append(title,sub);const can=document.createElement('canvas');can.className='mapcanvas';const foot=document.createElement('div');foot.className='mapfoot';foot.textContent='Análisis GFS + ECMWF · '+layer.features.filter(f=>['AMARILLO','NARANJA','ROJO'].includes((f.properties?.nivel||'').toUpperCase())).length+' áreas coloreadas · Clic: localidad más cercana · Experimental';card.append(head,can,foot);dst.append(card);drawAlertMap(can,layer,fen);attachMapZoom(can,card);}}
 async function cargarPublicacionAutomatica(){
   status('Consultando la última publicación meteorológica válida…');
   try{
