@@ -224,6 +224,7 @@ function attachMapZoom(canvas,card){
  }
  z.render=render;
  z.focusProjected=(px,py,scale)=>{
+  canvas._clickedReference=false;
   z.factor=Math.max(1,Math.min(6,scale));
   z.cx=px;z.cy=py;render();$('tip').style.display='none';
  };
@@ -231,6 +232,7 @@ function attachMapZoom(canvas,card){
   const xy=proj(lon,lat);z.focusProjected(xy[0],xy[1],scale);
  };
  function changeZoom(target,x=W/2,y=H/2){
+  canvas._clickedReference=false;
   const next=Math.min(6,Math.max(1,target));
   const ax=z.cx+(x-W/2)/z.factor,ay=z.cy+(y-H/2)/z.factor;
   z.cx=ax-(x-W/2)/next;z.cy=ay-(y-H/2)/next;z.factor=next;
