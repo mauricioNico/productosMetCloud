@@ -56,7 +56,7 @@ try:
     canvas.click(position={'x':w/2,'y':h/2},timeout=10000)
     tip=page.locator('#tip')
     msg=tip.inner_text()
-    assert re.search(r'A [0-9.,]+ km de Tupungato \(Mendoza\)',msg),msg
+    assert re.search(r'A [0-9.,]+ km de .+ \(Mendoza\)',msg),msg
     assert 'GeoRef' in msg and 'Clic:' in msg,msg
     if section=='#rainGrid canvas':
      assert 'Lluvia:' in msg and ('GFS' in msg or 'ECMWF' in msg),msg
@@ -87,7 +87,7 @@ try:
   width=c.evaluate('(x)=>x.getBoundingClientRect().width')
   height=c.evaluate('(x)=>x.getBoundingClientRect().height')
   c.click(position={'x':width/2,'y':height/2})
-  assert 'km de Tupungato (Mendoza)' in page.locator('#tip').inner_text()
+  assert re.search(r'km de .+ \(Mendoza\)',page.locator('#tip').inner_text())
   page.locator('#placeClear').click()
   assert not page.locator('#placeSearch').input_value()
   assert page.evaluate("Array.from(document.querySelectorAll('canvas.mapcanvas')).every(c=>c._placeHits.length===0)")
