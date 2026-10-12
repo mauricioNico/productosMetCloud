@@ -130,6 +130,32 @@ jobs:
           [ -n "$GFS" ] && ARGS+=(--gfs "$GFS")
           [ -n "$ECMWF" ] && ARGS+=(--ecmwf "$ECMWF")
           java -jar vigilancia/target/vigilancia-faa-1.0.0.jar "${ARGS[@]}"
+      - name: Renombrar resumen de vigilancia con corrida de referencia
+        if: ${{ hashFiles('vigilancia_resultado/resumen_vigilancia.png') != '' }}
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          carpeta = Path("vigilancia_resultado")
+          origen = carpeta / "resumen_vigilancia.png"
+          meta = carpeta / "eventos_vigilancia.json"
+
+          data = json.loads(meta.read_text(encoding="utf-8"))
+          corrida = (data.get("ecmwf") or {}).get("run") or (data.get("gfs") or {}).get("run")
+
+          if not corrida:
+              raise SystemExit("No se encontro corrida GFS/ECMWF en eventos_vigilancia.json")
+
+          dt = datetime.fromisoformat(corrida.replace("Z", "+00:00")).astimezone(timezone.utc)
+          destino = carpeta / f"resumen_vigilancia_corrida{dt:%d%m%Y}_{dt:%H}utc.png"
+
+          origen.replace(destino)
+          print(f"Vigilancia renombrada: {destino}")
+          PY
+
       - name: Subir vigilancia si hubo eventos
         if: ${{ hashFiles('vigilancia_resultado/**') != '' }}
         uses: actions/upload-artifact@v4
