@@ -80,6 +80,8 @@ jobs:
           meta=json.loads((p/f"manifest_{m}.json").read_text())
           rows=list(csv.DictReader((p/f"grilla_{m}_real.csv").open(),delimiter=";"))
           assert len(meta["datos"])==12 and len(rows)>100
+          assert 'temp2m_c' in rows[0], 'No se extrajo T2m para la anomalía'
+          assert all(x.get('temp2m_disponible') is True for x in meta['datos'])
           assert sorted(set(int(r["lead_h"]) for r in rows))==list(range(6,73,6))
           assert all(r["estado"]=="GRIB_REAL_EXPERIMENTAL_NO_ALERTA" for r in rows)
           assert meta["estado"]=="GRIB_REAL_EXPERIMENTAL_NO_ALERTA"
@@ -142,6 +144,14 @@ jobs:
           m=json.loads(Path('salidas_regionales/manifest.json').read_text())
           assert m['publicacion_autorizada'] is False
           assert len(m['capas'])==6
+          assert m['temperatura']['normal']=='NASA POWER / MERRA-2 1991-2020'
+          import csv
+          with (Path('salidas_regionales')/'grilla_gfs_ecmwf_real.csv').open() as archivo:
+              lector=csv.DictReader(archivo,delimiter=';')
+              assert {'temp_mean_24h_c','temp_climatology_c','temp_anomaly_c'} <= set(lector.fieldnames)
+              for i, fila in enumerate(lector):
+                  assert all(fila[col] for col in ('temp_mean_24h_c','temp_climatology_c','temp_anomaly_c'))
+                  if i>5000: break
           for tipo in ('lluvia','viento'):
               path=Path(f'salidas_regionales/regiones_umbrales_{tipo}_smn2024_PRELIMINAR.geojson')
               geo=json.loads(path.read_text())
@@ -216,7 +226,7 @@ jobs:
               assert all(f['properties'].get('ambito')=='EXPERIMENTAL' for f in capa['features'])
           with (entrada/files[0]).open(encoding='utf-8', newline='') as f:
               lector=csv.DictReader(f, delimiter=';')
-              assert {'model','run_time','lead_h','lat','lon','precip_interval_mm','wind_kmh','gust_kmh'} <= set(lector.fieldnames)
+              assert {'model','run_time','lead_h','lat','lon','precip_interval_mm','wind_kmh','gust_kmh','temp_mean_24h_c','temp_climatology_c','temp_anomaly_c'} <= set(lector.fieldnames)
               cnt=0
               modelos=set()
               plazos=set()
@@ -226,6 +236,7 @@ jobs:
                   modelos.add(fila['model'])
                   plazos.add(int(fila['lead_h']))
                   ciclos.add(fila['run_time'])
+                  assert all(fila[k] and -100<float(fila[k])<100 for k in ('temp_mean_24h_c','temp_climatology_c','temp_anomaly_c'))
           assert cnt>1000 and modelos=={'GFS','ECMWF'} and plazos=={24,48,72}
           assert ciclos=={m['run_time']}, 'CSV y metadatos pertenecen a corridas diferentes'
           (sitio/'index.html').write_text(html,encoding='utf-8')
@@ -245,6 +256,14 @@ jobs:
           assert '<script src="localidades-layer.js"></script>' in html
           for asset in (georef_script,georef_data):
               (sitio/asset.name).write_bytes(asset.read_bytes())
+          nasa=Path('web/monitoreo-extremo/climatologia_t2m_1991_2020.json')
+          smn=Path('web/monitoreo-extremo/normales_temperatura_smn_1991_2020.json')
+          audit=Path('web/monitoreo-extremo/validacion_smn_nasa.json')
+          assert nasa.is_file() and smn.is_file() and audit.is_file(), 'Faltan climatologías o validación SMN'
+          assert json.loads(smn.read_text(encoding='utf-8'))['total_estaciones']==105
+          assert json.loads(audit.read_text(encoding='utf-8'))['estaciones_territorio']==99
+          for asset in (nasa,smn,audit):
+              (sitio/asset.name).write_bytes(asset.read_bytes())
           print('Localidades GeoRef publicadas:',len(rows))
           (sitio/'.nojekyll').write_text('',encoding='utf-8')
           with zipfile.ZipFile(datos/'monitoreo-extremo.zip','w',
@@ -255,6 +274,7 @@ jobs:
           info={'estado':'PUBLICADO','ciclo_utc':m['run_time'],
                 'publicado_utc':publicado,'modelos':sorted(modelos),
                 'registros':cnt,'capas_geojson':6,
+                'temperatura':m['temperatura'],
                 'dominio':m['dominio'],'publicacion_autorizada':False,
                 'tipo':'MONITOREO_EXPERIMENTAL_NO_OPERATIVO',
                 'fuente_workflow':'Monitoreo extremo',

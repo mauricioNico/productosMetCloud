@@ -35,8 +35,18 @@ try:
              lambda route:route.fulfill(content_type='application/zip',body=args.zip.read_bytes()))
   page.goto(f'http://127.0.0.1:{server.server_port}/web/monitoreo-extremo/index.html')
   page.wait_for_function("document.getElementById('placesStatus').textContent.includes('GeoRef')",timeout=30000)
-  page.wait_for_function("csvRows.length>100 && Object.keys(alertFeatures).length===6",timeout=45000)
-  assert page.locator('canvas.mapcanvas').count()==4
+  try:
+   page.wait_for_function("csvRows.length>100 && Object.keys(alertFeatures).length===6",timeout=90000)
+  except Exception:
+   print('DIAGNOSTICO_CARGA',page.evaluate("""() => ({
+      status:document.querySelector('#state')?.textContent,
+      registros:typeof csvRows!=='undefined'?csvRows.length:null,
+      capas:typeof alertFeatures!=='undefined'?Object.keys(alertFeatures):null,
+      mapas:document.querySelectorAll('canvas.mapcanvas').length,
+      resumen:document.querySelector('#summary')?.textContent
+   })"""),'ERRORES_JS',errors,flush=True)
+   raise
+  assert page.locator('canvas.mapcanvas').count()==6
   assert page.evaluate("Array.from(document.querySelectorAll('canvas.mapcanvas')).every(c=>c._placeHits.length===0)"),'The map must be clean without search'
   page.locator('#placeSearch').fill('Tupungato')
   suggestion=page.locator('#placeSuggestions button').filter(has_text='Tupungato').first
@@ -47,7 +57,7 @@ try:
 
   # Center of each zoomed map corresponds to the selected GeoRef locality (Tupungato).
   texts={}
-  for section in ('#alertGrid canvas','#rainGrid canvas'):
+  for section in ('#alertGrid canvas','#rainGrid canvas','#tempGrid canvas'):
    for index in (0,1):
     canvas=page.locator(section).nth(index)
     canvas.scroll_into_view_if_needed()
@@ -60,6 +70,9 @@ try:
     assert 'GeoRef' in msg and 'Clic:' in msg,msg
     if section=='#rainGrid canvas':
      assert 'Lluvia:' in msg and ('GFS' in msg or 'ECMWF' in msg),msg
+    elif section=='#tempGrid canvas':
+     assert 'Anomalía:' in msg and 'Normal NASA 1991–2020:' in msg,msg
+     assert 'Media prevista 24h:' in msg,msg
     else:
      assert 'Nivel' in msg,msg
     texts[section+str(index)]=msg
@@ -96,7 +109,7 @@ try:
    args.screenshot.parent.mkdir(parents=True,exist_ok=True)
    page.screenshot(path=str(args.screenshot),full_page=True)
   print(json.dumps({'status':'OK','cycle':metadata['ciclo_utc'],
-    'four_maps_clicked':len(texts),'references':texts,
+    'six_maps_clicked':len(texts),'references':texts,
     'search_and_day_navigation':True,'click_tooltip_persists':True,
     'zoom_clears_pin':True,'javascript_errors':errors},ensure_ascii=False))
   browser.close()
