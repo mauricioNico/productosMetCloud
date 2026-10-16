@@ -8,7 +8,7 @@ la climatología versionada, no en cada corrida del modelo.
 """
 from __future__ import annotations
 import hashlib
-import io
+import tempfile
 import json
 import sys
 import time
@@ -57,27 +57,32 @@ def main():
         for west in [-85,-75,-65,-55]:
             east=min(-45,west+10)
             url,raw=download(south,north,west,east)
-            with xr.open_dataset(io.BytesIO(raw),engine="netcdf4") as ds:
-                var=ds["T2M"]
-                if not str(var.attrs.get("units","")).strip()=="C":
-                    raise ValueError(f"Unidades de clima distintas de Celsius: {var.attrs.get('units')}")
-                times=np.asarray(ds["time"].values,dtype=int)
-                if not np.array_equal(times[:12],np.arange(1,13)):
-                    raise ValueError(f"Meses inesperados: {times}")
-                for i,lat in enumerate(ds.lat.values):
-                    yy=int(round((float(lat)+55)*2))
-                    if yy<0 or yy>=len(LATS) or abs(LATS[yy]-lat)>.001:continue
-                    for j,lon in enumerate(ds.lon.values):
-                        xx=int(round((float(lon)+85)/.625))
-                        if xx<0 or xx>=len(LONS) or abs(LONS[xx]-lon)>.001:continue
-                        new=np.asarray(var.values[:12,i,j],dtype=float)
-                        if np.any(~np.isfinite(new)) or np.any((new < -65)|(new > 58)):
-                            raise ValueError(f"NASA POWER devolvió T2M inválida {lat},{lon}: {new}")
-                        old=MATRIX[:,yy,xx]
-                        if np.any(np.isfinite(old)) and not np.allclose(old,new,atol=.01):
-                            raise ValueError(f"Datos incompatibles en borde entre mosaicos {lat},{lon}")
-                        MATRIX[:,yy,xx]=new
-                        total+=1
+            with tempfile.NamedTemporaryFile(suffix=".nc") as temp:
+                temp.write(raw);temp.flush()
+                ds=xr.open_dataset(temp.name,engine="netcdf4")
+                try:
+                    var=ds["T2M"]
+                    if not str(var.attrs.get("units","")).strip()=="C":
+                        raise ValueError(f"Unidades de clima distintas de Celsius: {var.attrs.get('units')}")
+                    times=np.asarray(ds["time"].values,dtype=int)
+                    if not np.array_equal(times[:12],np.arange(1,13)):
+                        raise ValueError(f"Meses inesperados: {times}")
+                    for i,lat in enumerate(ds.lat.values):
+                        yy=int(round((float(lat)+55)*2))
+                        if yy<0 or yy>=len(LATS) or abs(LATS[yy]-lat)>.001:continue
+                        for j,lon in enumerate(ds.lon.values):
+                            xx=int(round((float(lon)+85)/.625))
+                            if xx<0 or xx>=len(LONS) or abs(LONS[xx]-lon)>.001:continue
+                            new=np.asarray(var.values[:12,i,j],dtype=float)
+                            if np.any(~np.isfinite(new)) or np.any((new < -65)|(new > 58)):
+                                raise ValueError(f"NASA POWER devolvió T2M inválida {lat},{lon}: {new}")
+                            old=MATRIX[:,yy,xx]
+                            if np.any(np.isfinite(old)) and not np.allclose(old,new,atol=.01):
+                                raise ValueError(f"Datos incompatibles en borde entre mosaicos {lat},{lon}")
+                            MATRIX[:,yy,xx]=new
+                            total+=1
+                finally:
+                    ds.close()
             TILES.append({"s":south,"n":north,"w":west,"e":east,
                           "sha256":hashlib.sha256(raw).hexdigest(),"url":url})
             print(f"OK bloque {south}/{north} {west}/{east} (bytes {len(raw)})",flush=True)
