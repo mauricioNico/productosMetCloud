@@ -6,17 +6,13 @@ from urllib.parse import urlencode
 import requests
 from pathlib import Path
 params={
-    "latitude-min":-40,
-    "latitude-max":-37,
-    "longitude-min":-65,
-    "longitude-max":-62,
     "parameters":"T2M",
     "community":"AG",
     "start":1991,
     "end":2020,
     "format":"NetCDF",
 }
-base="https://power.larc.nasa.gov/api/temporal/climatology/regional"
+base="https://power.larc.nasa.gov/api/temporal/climatology/global"
 url=base+"?"+urlencode(params)
 print("URL:",url,flush=True)
 response=requests.get(url,timeout=180)
@@ -28,4 +24,5 @@ p.write_bytes(response.content)
 import xarray as xr
 ds=xr.open_dataset(p)
 print("NETCDF:",ds,flush=True)
+print("Region Argentina:",ds.T2M.sel(lat=slice(-55,-20),lon=slice(-85,-45)).shape,flush=True)
 for k in ds.data_vars: print(k,ds[k].attrs,ds[k].shape,flush=True)
