@@ -169,3 +169,54 @@ jobs:
           path: salidas_regionales/
           retention-days: 14
 
+
+  probar_browser:
+    name: Probar seis mapas con Chromium y GRIB real
+    needs: combinar
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/download-artifact@v4
+        with:
+          name: alertas-regionales-reales-EXPERIMENTAL
+          path: /tmp/capas
+      - name: Comprobar grilla térmica, armar ZIP meteorológico real
+        run: |
+          python - <<'PY'
+          import json,csv,zipfile
+          from pathlib import Path
+          p=Path('/tmp/capas')
+          m=json.loads((p/'manifest.json').read_text())
+          assert m['temperatura']['normal']=='NASA POWER / MERRA-2 1991-2020'
+          with (p/'grilla_gfs_ecmwf_real.csv').open() as f:
+              reader=csv.DictReader(f,delimiter=';')
+              assert {'temp_mean_24h_c','temp_climatology_c','temp_anomaly_c'}<=set(reader.fieldnames)
+              data=next(reader)
+              assert all(data[k] for k in ('temp_mean_24h_c','temp_climatology_c','temp_anomaly_c'))
+          with zipfile.ZipFile('/tmp/meteo-real.zip','w',compression=zipfile.ZIP_DEFLATED) as z:
+              for file in p.iterdir():
+                  if file.suffix in ('.csv','.geojson','.json'):
+                      z.write(file,arcname=file.name)
+          Path('/tmp/publicacion.json').write_text(json.dumps({'estado':'PUBLICADO','ciclo_utc':m['run_time']}))
+          print('Datos de temperatura verificados, ciclo',m['run_time'])
+          PY
+      - name: Preparar navegador
+        run: |
+          python -m pip install "playwright>=1.50,<2"
+          python -m playwright install --with-deps chromium
+      - name: Validar seis mapas, georreferenciación y termometría con datos reales
+        run: |
+          python web/monitoreo-extremo/tests/localidades-browser.py \
+            --zip /tmp/meteo-real.zip \
+            --metadata /tmp/publicacion.json \
+            --screenshot /tmp/temperatura-3dias.png
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: capturas-anomalia-termica-grib-real
+          path: /tmp/temperatura-3dias.png
+          if-no-files-found: ignore
