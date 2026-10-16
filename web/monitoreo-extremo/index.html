@@ -91,6 +91,10 @@ footer{margin:26px 0 0;font-size:12px;color:#536c81;line-height:1.5}
 </div>
 <div class="sectionhead"><h2>Precipitación prevista — GFS y ECMWF</h2><p>Acumulado de lluvia en 24 horas, comparable entre modelos. La intensidad está expresada en milímetros; los colores no corresponden a niveles de alerta.</p></div>
 <div class="legend" id="rainLegend"></div><div class="mapgrid" id="rainGrid"></div>
+<div id="tempSection" style="display:none">
+<div class="sectionhead"><h2>Anomalías de temperatura media — GFS y ECMWF</h2><p>Diferencia entre la temperatura media prevista para cada período de 24 horas y la normal mensual SMN de la estación. Valores puntuales, sin interpolación espacial ni niveles de alerta.</p></div>
+<div class="legend"><span class="legendItem"><i class="swatch" style="background:#225ca3"></i>≤ −4 °C</span><span class="legendItem"><i class="swatch" style="background:#75b4db"></i>−2 °C</span><span class="legendItem"><i class="swatch" style="background:#ece8cf"></i>≈ 0 °C</span><span class="legendItem"><i class="swatch" style="background:#f1ad74"></i>+2 °C</span><span class="legendItem"><i class="swatch" style="background:#b93431"></i>≥ +4 °C</span></div>
+<div class="mapgrid" id="tempGrid"></div><p class="muted" style="font-size:12px">Referencia SMN: normales mensuales principalmente 1991–2020. Comparación aproximada con pronósticos cada seis horas; no equivale a una anomalía diaria climatológica de grilla.</p></div>
 <footer><b>Sobre el monitoreo:</b> Comparación de pronósticos GFS y ECMWF con umbrales regionales de referencia todavía en validación. El verde es un fondo gráfico y puede incluir zonas sin evaluación; no garantiza ausencia de riesgo. <b>Producto experimental, no sustituye las alertas meteorológicas oficiales del SMN.</b> Cartografía: IGN/Georef y Natural Earth.</footer>
 </div>
 </main><div id="tip"></div>
@@ -295,7 +299,7 @@ function redraw(){if(!csvRows.length)return;const lead=dayLeads[currentDay];
 for(const kind of ['rain']){const dst=$('rainGrid');dst.replaceChildren();for(const model of ['GFS','ECMWF']){
 const rows=csvRows.filter(r=>r.model===model&&r.lead===lead);
 if(rows.length)dst.append(createCard(model,lead,kind,rows));}}
-$('results').style.display='block';updateDayControls();}
+$('results').style.display='block';updateDayControls();drawTemperature();}
 function showDay(index,scroll){if(!csvRows.length)return;currentDay=Math.max(0,Math.min(dayLeads.length-1,index));redraw();drawAlerts();
 if(scroll)$('dayNav').scrollIntoView({behavior:'smooth',block:'start'});
 }
@@ -305,7 +309,10 @@ function drawSummary(){const box=$('summary');box.replaceChildren();let models=[
 function geojsonFile(entries){return entries.find(e=>/lluvia_24h\.geojson$/i.test(e.name));}
 async function chooseUpload(file){status('Leyendo '+file.name+'…');try{if(!file)throw Error('No se seleccionó ningún archivo');let entries;if(/\.zip$/i.test(file.name))entries=await unzip(await file.arrayBuffer());else entries=[{name:file.name,text:await file.text()}];let combined=entries.find(e=>/grilla_gfs_ecmwf_real\.csv$/i.test(e.name));let files=combined?[combined]:entries.filter(e=>/grilla_(gfs|ecmwf)_real\.csv$/i.test(e.name));if(!files.length){const csvAny=entries.filter(e=>/\.csv$/i.test(e.name));if(csvAny.length===1)files=csvAny;}if(!files.length){const sim=geojsonFile(entries);if(sim)throw Error('Este ZIP es de la simulación GeoJSON anterior, no de grillas reales. Usá el artefacto grilla-real-gfs-ecmwf-experimental de GitHub Actions.');throw Error('No encuentro grilla_gfs_ecmwf_real.csv en el archivo. Verificá que subiste el ZIP de la prueba GRIB real.');}
 csvRows=files.flatMap(e=>parseCSV(e.text));if(csvRows.length>100000)throw Error('Cantidad excesiva de puntos.');
-alertFeatures={};for(const entry of entries){const match=entry.name.match(/(?:^|\/)(lluvia|viento)_(24|48|72)h\.geojson$/i);if(!match)continue;let layer=JSON.parse(entry.text);if(layer.type!=='FeatureCollection'||!Array.isArray(layer.features))throw Error('Capa GeoJSON inválida: '+entry.name);alertFeatures[match[1].toLowerCase()+'_'+match[2]+'h']=layer;}
+const tempEntry=entries.find(e=>/(?:^|\/)anomalias_temperatura_estaciones\.json$/i.test(e.name));
+ tempAnomalies=tempEntry?JSON.parse(tempEntry.text):null;
+ if(tempAnomalies&&!tempAnomalies.capas?.['24'])throw Error('Anomalías sin períodos válidos');
+ alertFeatures={};for(const entry of entries){const match=entry.name.match(/(?:^|\/)(lluvia|viento)_(24|48|72)h\.geojson$/i);if(!match)continue;let layer=JSON.parse(entry.text);if(layer.type!=='FeatureCollection'||!Array.isArray(layer.features))throw Error('Capa GeoJSON inválida: '+entry.name);alertFeatures[match[1].toLowerCase()+'_'+match[2]+'h']=layer;}
 drawSummary();status('Datos cargados correctamente: '+csvRows.length.toLocaleString('es-AR')+' puntos; '+Object.keys(alertFeatures).length+' capas regionales.','good');currentDay=0;showDay(0,false);}catch(e){csvRows=[];$('results').style.display='none';status('No se pudo dibujar: '+e.message,'bad');console.error(e)}}
 const ALERT_COLORS={VERDE:'#49c98e',AMARILLO:'#f6d44e',NARANJA:'#f38b3b',ROJO:'#d84e5e'};
 const BASE_VERDE_ARGENTINA=ALERT_COLORS.VERDE;
@@ -381,6 +388,46 @@ canvas.onmouseleave=()=>{canvas._clickedReference=false;$('tip').style.display='
 function drawAlerts(){const keys=Object.keys(alertFeatures);$('alerts').style.display=keys.length?'block':'none';if(!keys.length)return;
 const leg=$('alertLegend');leg.replaceChildren();for(const [nombre,color] of [['Verde','#49c98e'],['Amarillo','#f6d44e'],['Naranja','#f38b3b'],['Rojo','#d84e5e']]){const e=document.createElement('span');e.className='legendItem';const sw=document.createElement('i');sw.className='swatch';sw.style.background=color;const label=document.createElement('span');label.textContent=nombre;e.append(sw,label);leg.append(e);} 
 const dst=$('alertGrid');dst.replaceChildren();const lead=dayLeads[currentDay];for(const fen of ['lluvia','viento']){const layer=alertFeatures[fen+'_'+lead+'h'];if(!layer)continue;const card=document.createElement('article');card.className='mapcard';const head=document.createElement('div');head.className='maphead';const title=document.createElement('strong');title.textContent=(fen==='lluvia'?'VIGILANCIA POR LLUVIA':'VIGILANCIA POR VIENTO')+' · '+(lead-24)+'–'+lead+' h';const sub=document.createElement('small');sub.textContent='GFS + ECMWF · Experimental';head.append(title,sub);const can=document.createElement('canvas');can.className='mapcanvas';const foot=document.createElement('div');foot.className='mapfoot';foot.textContent='Análisis GFS + ECMWF · '+layer.features.filter(f=>['AMARILLO','NARANJA','ROJO'].includes((f.properties?.nivel||'').toUpperCase())).length+' áreas coloreadas · Clic: localidad más cercana · Experimental';card.append(head,can,foot);dst.append(card);drawAlertMap(can,layer,fen);attachMapZoom(can,card);}}
+
+let tempAnomalies=null;
+function tempColor(v){return v<=-4?'#225ca3':v<=-2?'#75b4db':v<2?'#ece8cf':v<4?'#f1ad74':'#b93431';}
+function drawTemperature(){
+ const root=$('tempSection'),grid=$('tempGrid');grid.replaceChildren();
+ const lead=dayLeads[currentDay],data=tempAnomalies?.capas?.[String(lead)];
+ root.style.display=data?'block':'none';if(!data)return;
+ for(const model of ['GFS','ECMWF']){
+  const points=data[model]||[];if(!points.length)continue;
+  const card=document.createElement('article');card.className='mapcard';
+  const head=document.createElement('div');head.className='maphead';
+  const name=document.createElement('strong');name.textContent=model+' · Anomalía T media · '+(lead-24)+'–'+lead+' h';
+  const small=document.createElement('small');small.textContent='SMN · normales mensuales';head.append(name,small);
+  const can=document.createElement('canvas');can.className='mapcanvas';can.setAttribute('aria-label','Anomalías térmicas '+model);
+  const foot=document.createElement('div');foot.className='mapfoot';
+  foot.textContent=points.length+' estaciones con normal comparable · Cursor: detalle · Clic: localidad cercana';
+  card.append(head,can,foot);grid.append(card);
+  const dpr=window.devicePixelRatio||1;can.width=Math.round(W*dpr);can.height=Math.round(H*dpr);
+  const ctx=can.getContext('2d');ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.fillStyle='#aeddf2';ctx.fillRect(0,0,W,H);drawCountries(ctx);
+  for(const pt of points){if(!Number.isFinite(pt.anomalia_c))continue;
+   const [x,y]=proj(pt.lon,pt.lat);ctx.beginPath();ctx.arc(x,y,4.7,0,Math.PI*2);
+   ctx.fillStyle=tempColor(pt.anomalia_c);ctx.fill();ctx.lineWidth=.8;ctx.strokeStyle='#263c49';ctx.stroke();
+  }
+  drawProvinces(ctx);drawArgentinaOutline(ctx);drawCountryNames(ctx);
+  can.onmousemove=e=>{
+   if(can._mapZoom?.drag||can._clickedReference)return;
+   const [x,y]=canvasMapPosition(can,e);let best=null,dist=Infinity;
+   for(const p of points){const q=proj(p.lon,p.lat),d=(q[0]-x)**2+(q[1]-y)**2;if(d<dist){dist=d;best=p;}}
+   const tip=$('tip');
+   if(best&&dist<115){const a=best.anomalia_c;
+    tip.textContent=best.estacion+' · '+model+'\nAnomalía '+(a>0?'+':'')+a.toFixed(1)+' °C\nPrevista '+best.temperatura_media_prevista_c.toFixed(1)+' °C · Normal '+best.normal_mensual_c.toFixed(1)+' °C\nPeríodo SMN: '+best.periodo;
+    tip.style.display='block';tip.style.left=Math.max(8,Math.min(window.innerWidth-280,e.clientX+12))+'px';tip.style.top=Math.max(8,e.clientY-85)+'px';
+   }else tip.style.display='none';
+  };
+  can.onmouseleave=()=>{can._clickedReference=false;$('tip').style.display='none';};
+  attachMapZoom(can,card);
+ }
+}
+
 async function cargarPublicacionAutomatica(){
   status('Consultando la última publicación meteorológica válida…');
   try{
