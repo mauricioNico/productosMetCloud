@@ -6,13 +6,17 @@ from urllib.parse import urlencode
 import requests
 from pathlib import Path
 params={
+    "latitude-min":-55,
+    "latitude-max":-20,
+    "longitude-min":-85,
+    "longitude-max":-45,
     "parameters":"T2M",
     "community":"AG",
     "start":1991,
     "end":2020,
     "format":"NetCDF",
 }
-base="https://power.larc.nasa.gov/api/temporal/climatology/global"
+base="https://power.larc.nasa.gov/api/temporal/climatology/regional"
 url=base+"?"+urlencode(params)
 print("URL:",url,flush=True)
 response=requests.get(url,timeout=180)
