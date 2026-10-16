@@ -82,6 +82,7 @@ jobs:
           assert len(meta["datos"])==12 and len(rows)>100
           assert sorted(set(int(r["lead_h"]) for r in rows))==list(range(6,73,6))
           assert all(r["estado"]=="GRIB_REAL_EXPERIMENTAL_NO_ALERTA" for r in rows)
+          assert all(r['t2m_c'] for r in rows)
           assert meta["estado"]=="GRIB_REAL_EXPERIMENTAL_NO_ALERTA"
           print(f"OK {m}: {len(rows)} puntos, doce plazos f006...f072")
           print("Intervalos de precipitación:", [(x["f"],x["precip_grib_stepRange"],x["precip_interval_h"]) for x in meta["datos"]])
@@ -199,7 +200,7 @@ jobs:
           assert 'cargarPublicacionAutomatica();' in html
           assert 'Meteorología FAA' in html
           assert 'id="prevDay"' in html
-          files=['grilla_gfs_ecmwf_real.csv','manifest.json']
+          files=['grilla_gfs_ecmwf_real.csv','manifest.json','anomalias_temperatura_estaciones.json']
           for fen in ('lluvia','viento'):
               for lead in (24,48,72):
                   files.append(f'{fen}_{lead}h.geojson')
@@ -210,13 +211,17 @@ jobs:
           assert m['publicacion_autorizada'] is False
           assert len(m['capas'])==6
           assert m['run_time'].endswith('Z')
-          for name in files[2:]:
+          anom=json.loads((entrada/'anomalias_temperatura_estaciones.json').read_text(encoding='utf-8'))
+          assert set(anom['capas'])=={'24','48','72'}
+          assert all(set(v)=={'GFS','ECMWF'} for v in anom['capas'].values())
+          assert all(len(x)>=40 for v in anom['capas'].values() for x in v.values())
+          for name in files[3:]:
               capa=json.loads((entrada/name).read_text(encoding='utf-8'))
               assert capa['type']=='FeatureCollection'
               assert all(f['properties'].get('ambito')=='EXPERIMENTAL' for f in capa['features'])
           with (entrada/files[0]).open(encoding='utf-8', newline='') as f:
               lector=csv.DictReader(f, delimiter=';')
-              assert {'model','run_time','lead_h','lat','lon','precip_interval_mm','wind_kmh','gust_kmh'} <= set(lector.fieldnames)
+              assert {'model','run_time','lead_h','lat','lon','precip_interval_mm','wind_kmh','gust_kmh','t2m_c'} <= set(lector.fieldnames)
               cnt=0
               modelos=set()
               plazos=set()
@@ -252,7 +257,7 @@ jobs:
               for name in files:
                   z.write(entrada/name,arcname=name)
           publicado=datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
-          info={'estado':'PUBLICADO','ciclo_utc':m['run_time'],
+          info={'estaciones_anomalias':len(anom['capas']['24']['GFS']),'estado':'PUBLICADO','ciclo_utc':m['run_time'],
                 'publicado_utc':publicado,'modelos':sorted(modelos),
                 'registros':cnt,'capas_geojson':6,
                 'dominio':m['dominio'],'publicacion_autorizada':False,
