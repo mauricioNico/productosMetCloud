@@ -23,10 +23,11 @@ FIELDS = {
     "v10": ("v10", "10v", "vgrd"),
     "gust": ("gust", "10fg", "10fg3"),
     "tp": ("tp", "apcp"),
+    "t2m": ("t2m", "2t", "2tmp", "tmp"),
 }
 CSV_COLS = ("model", "run_time", "valid_time", "lead_h", "lat", "lon",
             "precip_interval_mm", "precip_window_h", "wind_kmh",
-            "gust_kmh", "estado")
+            "gust_kmh", "t2m_c", "estado")
 
 
 def run_utc():
@@ -71,6 +72,7 @@ def download_gfs(run, step, target):
         "v10": ("VGRD", "10 m above ground"),
         "gust": ("GUST", "surface"),
         "tp": ("APCP", "surface"),
+        "t2m": ("TMP", "2 m above ground"),
     }
     requested = []
     for field, (var, level) in requests_specs.items():
@@ -107,7 +109,7 @@ def download_ecmwf(run, step, target):
     client = Client(source="ecmwf", model="ifs", resol="0p25")
     kwargs = dict(date=f"{run:%Y%m%d}", time=run.hour, step=step,
                   type="fc", stream="oper")
-    client.retrieve(**kwargs, param=["tp", "10u", "10v"], target=str(target))
+    client.retrieve(**kwargs, param=["tp", "10u", "10v", "2t"], target=str(target))
     # Ráfaga opcional: la disponibilidad depende del ciclo y paso.
     gust_file = target.with_name(target.stem + "_gust.grib2")
     for param in ("10fg", "10fg3"):
@@ -137,7 +139,7 @@ def abrir_campos(path):
             for key, opciones in FIELDS.items():
                 if key not in encontrados and any(a in opciones for a in aliases):
                     encontrados[key] = da.squeeze(drop=True)
-    faltan = {"u10", "v10", "tp"} - set(encontrados)
+    faltan = {"u10", "v10", "tp", "t2m"} - set(encontrados)
     if faltan:
         raise ValueError(f"GRIB {path.name}: faltan campos {sorted(faltan)}; presentes {list(encontrados)}")
     return encontrados
@@ -191,8 +193,13 @@ def convertir(model, run, step, path):
     lat, lon, u = cropped(fields["u10"])
     _, _, v = cropped(fields["v10"])
     _, _, tp = cropped(fields["tp"])
-    if u.shape != v.shape or u.shape != tp.shape:
+    _, _, t2m = cropped(fields["t2m"])
+    if u.shape != v.shape or u.shape != tp.shape or u.shape != t2m.shape:
         raise ValueError(f"{model} f{step}: shape inconsistente")
+    temp_unit = str(fields["t2m"].attrs.get("units", ""))
+    if temp_unit not in ("K", "kelvin", "Kelvin"):
+        raise ValueError(f"Unidad T2m inesperada: {temp_unit}")
+    t2m_c = t2m - 273.15
     wind = np.hypot(u, v) * 3.6  # m/s -> km/h
     wind_units = str(fields["u10"].attrs.get("units", ""))
     if wind_units not in ("m s**-1", "m/s", "m s-1"):
@@ -232,6 +239,7 @@ def convertir(model, run, step, path):
                 "precip_window_h": hours if valid_tp else "",
                 "wind_kmh": finite(wind[i, j]),
                 "gust_kmh": finite(gust[i, j]) if gust is not None else "",
+                "t2m_c": finite(t2m_c[i,j]),
                 "estado": "GRIB_REAL_EXPERIMENTAL_NO_ALERTA"
             })
     return rows, meta
