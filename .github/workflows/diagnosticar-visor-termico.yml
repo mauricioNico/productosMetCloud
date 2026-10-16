@@ -36,7 +36,7 @@ jobs:
           with zipfile.ZipFile('/tmp/real.zip','w',compression=zipfile.ZIP_DEFLATED) as z:
               for f in p.iterdir():
                   if f.suffix in ('.csv','.json','.geojson'):z.write(f,arcname=f.name)
-          Path('/tmp/meta.json').write_text(json.dumps({'estado':'PUBLICADO','ciclo_utc':m['run_time']}))
+          Path('/tmp/meta.json').write_text(json.dumps({'estado':'PUBLICADO','ciclo_utc':m['run_time'],'publicado_utc':m['run_time'],'publicacion_autorizada':False}))
           print('Tamaño ZIP',Path('/tmp/real.zip').stat().st_size)
           PY
       - name: Preparar Chromium
