@@ -21,13 +21,14 @@ from shapely.ops import unary_union
 
 from generar_alertas_web import consenso, leer_umbrales, NIVELES
 from regiones_smn2024 import asignar_nombres, exportar_geojson
+from anomalia_temperatura import leer_climatologia, calcular_anomalias
 
 PASOS = list(range(6, 73, 6))
 PLAZOS = (24, 48, 72)
 RADIO_KM = 120
 NIVEL = {"AMARILLO": 1, "NARANJA": 2, "ROJO": 3}
 COLUMNAS = ("model", "run_time", "valid_time", "lead_h", "lat", "lon",
-            "precip_interval_mm", "precip_window_h", "wind_kmh", "gust_kmh", "estado")
+            "precip_interval_mm", "precip_window_h", "wind_kmh", "gust_kmh", "temp2m_c", "estado")
 
 
 def geometria_provincias(repo):
@@ -64,7 +65,7 @@ def leer_puntos(path):
     if len(d) != len(PASOS)*ny*nx:
         raise ValueError(f"{path}: grilla irregular o faltan celdas")
     arrays = {}
-    for column in ("precip_interval_mm", "precip_window_h", "wind_kmh", "gust_kmh"):
+    for column in ("precip_interval_mm", "precip_window_h", "wind_kmh", "gust_kmh", "temp2m_c"):
         arrays[column] = pd.to_numeric(d[column], errors="coerce").to_numpy().reshape((len(PASOS), ny, nx))
     for step, window in zip(PASOS, arrays["precip_window_h"]):
         if not np.all(np.isfinite(window)) or len(np.unique(window)) != 1:
@@ -220,10 +221,17 @@ def main():
           {k:int(np.count_nonzero(regiones[k])) for k in ("LLUVIA","VIENTO")},
           "CELDAS ARGENTINAS:",int(np.count_nonzero(dentro)),flush=True)
     valores={m:acumulados_y_viento(d) for m,d in modelos.items()}
+    clim=leer_climatologia(repo/"web/monitoreo-extremo/climatologia_t2m_1991_2020.json")
+    temp={m:calcular_anomalias(d,clim) for m,d in modelos.items()}
     meta={"tipo":"MONITOREO_EXPERIMENTAL_NO_OPERATIVO",
           "publicacion_autorizada":False, "run_time":g["run"],
           "dominio":{"south":-55,"north":-20,"west":-85,"east":-45},
-          "modelos":["GFS","ECMWF"],"regionalizacion":"Máscaras digitalizadas de SMN umbrales 2024 (aproximadas, no validadas).",
+          "modelos":["GFS","ECMWF"],
+          "temperatura":{"variable":"temperatura media a 2 metros",
+                          "ventana_h":24,"pasos_h":6,"normal":"NASA POWER / MERRA-2 1991-2020",
+                          "tipo":"anomalía térmica experimental; sin corrección de sesgo GFS/ECMWF",
+                          "escala":"grados Celsius","referencia":"normal mensual interpolada por fecha"},
+          "regionalizacion":"Máscaras digitalizadas de SMN umbrales 2024 (aproximadas, no validadas).",
           "restricciones":["Bordes con margen de seguridad de 2 píxeles: pueden quedar áreas sin asignar",
                            "Digitalización gráfica del PDF SMN julio 2024; NO es GeoJSON oficial",
                            "Zonda excluido de la región de viento general",
@@ -247,12 +255,14 @@ def main():
     # Se conserva grilla real a 0.25° en el dominio evaluado.
     npts=np.count_nonzero(dentro)
     with (out/"grilla_gfs_ecmwf_real.csv").open("w",encoding="utf-8",newline="") as f:
-        w=csv.DictWriter(f,fieldnames=COLUMNAS,delimiter=";")
+        output_cols=list(COLUMNAS)+["temp_mean_24h_c","temp_climatology_c","temp_anomaly_c"]
+        w=csv.DictWriter(f,fieldnames=output_cols,delimiter=";")
         w.writeheader()
         for model in ("GFS","ECMWF"):
             d=modelos[model]
             for lead in PLAZOS:
                 v=valores[model][lead]
+                tv=temp[model][lead]
                 for i,j in np.argwhere(dentro):
                     def fmt(x):return f"{float(x):.3f}" if np.isfinite(x) else ""
                     w.writerow({"model":model,"run_time":g["run"],
@@ -260,6 +270,10 @@ def main():
                      "lead_h":lead,"lat":d["lat"][i],"lon":d["lon"][j],
                      "precip_interval_mm":fmt(v["p24"][i,j]),"precip_window_h":24,
                      "wind_kmh":fmt(v["viento"][i,j]),"gust_kmh":fmt(v["rafaga"][i,j]),
+                     "temp2m_c":fmt(tv["tmean"][i,j]),
+                     "temp_mean_24h_c":fmt(tv["tmean"][i,j]),
+                     "temp_climatology_c":fmt(tv["clima"][i,j]),
+                     "temp_anomaly_c":fmt(tv["anom"][i,j]),
                      "estado":"GRIB_REAL_UMBRAL_PROVISORIO"})
     if npts*6>100000:
         print(f"AVISO: CSV de {npts*6} filas excede visor antiguo; usar GeoJSON solamente")
