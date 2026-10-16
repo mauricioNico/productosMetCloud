@@ -27,7 +27,7 @@ PLAZOS = (24, 48, 72)
 RADIO_KM = 120
 NIVEL = {"AMARILLO": 1, "NARANJA": 2, "ROJO": 3}
 COLUMNAS = ("model", "run_time", "valid_time", "lead_h", "lat", "lon",
-            "precip_interval_mm", "precip_window_h", "wind_kmh", "gust_kmh", "estado")
+            "precip_interval_mm", "precip_window_h", "wind_kmh", "gust_kmh", "t2m_c", "estado")
 
 
 def geometria_provincias(repo):
@@ -64,7 +64,7 @@ def leer_puntos(path):
     if len(d) != len(PASOS)*ny*nx:
         raise ValueError(f"{path}: grilla irregular o faltan celdas")
     arrays = {}
-    for column in ("precip_interval_mm", "precip_window_h", "wind_kmh", "gust_kmh"):
+    for column in ("precip_interval_mm", "precip_window_h", "wind_kmh", "gust_kmh", "t2m_c"):
         arrays[column] = pd.to_numeric(d[column], errors="coerce").to_numpy().reshape((len(PASOS), ny, nx))
     for step, window in zip(PASOS, arrays["precip_window_h"]):
         if not np.all(np.isfinite(window)) or len(np.unique(window)) != 1:
@@ -219,6 +219,47 @@ def main():
     print("REGIONES DIGITALIZADAS:",
           {k:int(np.count_nonzero(regiones[k])) for k in ("LLUVIA","VIENTO")},
           "CELDAS ARGENTINAS:",int(np.count_nonzero(dentro)),flush=True)
+
+    # No se inventa una grilla climatológica entre estaciones SMN.
+    normales=json.loads((Path(__file__).parent/"normales_tmedia_smn_1991_2020.json").read_text(encoding="utf-8"))
+    estaciones=normales["estaciones"]
+    t_anomalias={"fuente":"SMN normales de temperatura media mensual 1991-2020",
+        "metodo":"Media de cuatro pronósticos T2m separados seis horas menos normal mensual de estación. Comparación aproximada, no anomalía diaria climatológica.",
+        "capas":{}}
+    fecha=datetime.fromisoformat(g["run"].replace("Z","+00:00"))
+    for lead in PLAZOS:
+        t_anomalias["capas"][str(lead)]={}
+        steps=(lead-18,lead-12,lead-6,lead)
+        indices=[PASOS.index(q) for q in steps]
+        valid_dates=[fecha+timedelta(hours=q) for q in steps]
+        for model in ("GFS","ECMWF"):
+            d=modelos[model]
+            temp=d["t2m_c"]
+            if not np.isfinite(temp[indices]).all():
+                raise ValueError(f"{model}: T2m incompleta en {lead} h")
+            records=[]
+            for st in estaciones:
+                lat,lon=float(st["lat"]),float(st["lon"])
+                i=int(np.argmin(abs(d["lat"]-lat)))
+                j=int(np.argmin(abs(d["lon"]-lon)))
+                separation=np.hypot((d["lat"][i]-lat)*111,(d["lon"][j]-lon)*111*np.cos(np.deg2rad(lat)))
+                if separation>22:
+                    continue
+                norms=[st["mensuales"][date.month-1] for date in valid_dates]
+                if any(v is None for v in norms):
+                    continue
+                prevista=float(np.mean(temp[indices,i,j]))
+                base=float(np.mean(norms))
+                records.append({"estacion":st["nombre"],"lat":lat,"lon":lon,
+                   "modelo":model,"lead_h":lead,"periodo":st["periodo"],
+                   "temperatura_media_prevista_c":round(prevista,2),
+                   "normal_mensual_c":round(base,2),
+                   "anomalia_c":round(prevista-base,2)})
+            t_anomalias["capas"][str(lead)][model]=records
+    (out/"anomalias_temperatura_estaciones.json").write_text(
+        json.dumps(t_anomalias,ensure_ascii=False),encoding="utf-8")
+    print("Estaciones con anomalías:", {k:{m:len(x) for m,x in v.items()}
+          for k,v in t_anomalias["capas"].items()})
     valores={m:acumulados_y_viento(d) for m,d in modelos.items()}
     meta={"tipo":"MONITOREO_EXPERIMENTAL_NO_OPERATIVO",
           "publicacion_autorizada":False, "run_time":g["run"],
@@ -260,6 +301,7 @@ def main():
                      "lead_h":lead,"lat":d["lat"][i],"lon":d["lon"][j],
                      "precip_interval_mm":fmt(v["p24"][i,j]),"precip_window_h":24,
                      "wind_kmh":fmt(v["viento"][i,j]),"gust_kmh":fmt(v["rafaga"][i,j]),
+                     "t2m_c":fmt(d["t2m_c"][PASOS.index(lead),i,j]),
                      "estado":"GRIB_REAL_UMBRAL_PROVISORIO"})
     if npts*6>100000:
         print(f"AVISO: CSV de {npts*6} filas excede visor antiguo; usar GeoJSON solamente")
