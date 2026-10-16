@@ -201,7 +201,7 @@ jobs:
               for file in p.iterdir():
                   if file.suffix in ('.csv','.geojson','.json'):
                       z.write(file,arcname=file.name)
-          Path('/tmp/publicacion.json').write_text(json.dumps({'estado':'PUBLICADO','ciclo_utc':m['run_time']}))
+          Path('/tmp/publicacion.json').write_text(json.dumps({'estado':'PUBLICADO','ciclo_utc':m['run_time'],'publicado_utc':m['run_time'],'publicacion_autorizada':False}))
           print('Datos de temperatura verificados, ciclo',m['run_time'])
           PY
       - name: Preparar navegador
