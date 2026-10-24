@@ -5,6 +5,15 @@ on:
   schedule:
     - cron: "0 4 * * *"    # misma hora multimodelo: 04 UTC (01:00 Argentina)
     - cron: "0 18 * * *"   # misma hora multimodelo: 18 UTC (15:00 Argentina)
+  pull_request:
+    branches:
+      - master
+    paths:
+      - python/alertas_web/**
+      - web/cartografia/**
+      - web/monitoreo-extremo/**
+      - vigilancia/config/umbrales.csv
+      - .github/workflows/generar-zip-alertas-web.yml
   push:
     branches:
       - master
@@ -175,6 +184,7 @@ jobs:
 
 
   publicar_pages:
+    if: github.event_name != 'pull_request'
     name: Publicar visor FAA en GitHub Pages
     # Se reemplaza la web SOLO cuando los dos modelos y las seis capas terminaron bien.
     needs: combinar
