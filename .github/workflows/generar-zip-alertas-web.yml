@@ -129,6 +129,8 @@ jobs:
               assert not np.any(names=='ZONDA_SIN_UMBRAL_DE_VIENTO')
               print(tipo,np.count_nonzero(names),'puntos seguros de referencia')
           PY
+      - name: Probar normalizacion de acumulados ECMWF
+        run: PYTHONPATH=python/alertas_web python -m unittest -v test_ecmwf_acumulados
       - name: Aplicar umbrales regionales SOLO EN AREAS EXPERIMENTALES
         run: |
           python python/alertas_web/clasificar_grilla_regional_lab.py \
