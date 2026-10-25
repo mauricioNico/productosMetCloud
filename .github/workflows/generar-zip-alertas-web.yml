@@ -185,7 +185,6 @@ jobs:
 
 
   publicar_pages:
-    if: github.ref == 'refs/heads/master' && github.event_name != 'pull_request'
     name: Publicar visor FAA en GitHub Pages
     # Se reemplaza la web SOLO cuando los dos modelos y las seis capas terminaron bien.
     needs: combinar
