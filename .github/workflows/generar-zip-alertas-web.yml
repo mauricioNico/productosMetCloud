@@ -5,9 +5,19 @@ on:
   schedule:
     - cron: "0 4 * * *"    # misma hora multimodelo: 04 UTC (01:00 Argentina)
     - cron: "0 18 * * *"   # misma hora multimodelo: 18 UTC (15:00 Argentina)
+  pull_request:
+    branches:
+      - master
+    paths:
+      - python/alertas_web/**
+      - web/cartografia/**
+      - web/monitoreo-extremo/**
+      - vigilancia/config/umbrales.csv
+      - .github/workflows/generar-zip-alertas-web.yml
   push:
     branches:
       - master
+      - fix/ecmwf-precip-quantization-20261024
     paths:
       - python/alertas_web/**
       - web/cartografia/**
@@ -129,6 +139,8 @@ jobs:
               assert not np.any(names=='ZONDA_SIN_UMBRAL_DE_VIENTO')
               print(tipo,np.count_nonzero(names),'puntos seguros de referencia')
           PY
+      - name: Probar normalizacion de acumulados ECMWF
+        run: PYTHONPATH=python/alertas_web python -m unittest -v test_ecmwf_acumulados
       - name: Aplicar umbrales regionales SOLO EN AREAS EXPERIMENTALES
         run: |
           python python/alertas_web/clasificar_grilla_regional_lab.py \

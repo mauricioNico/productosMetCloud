@@ -102,8 +102,27 @@ def normalizar_acumulados(datos):
             if not np.all(datos["precip_window_h"][i] == step):
                 raise ValueError(f"ECMWF f{step}: acumulado distinto a 0-f{step}")
         inc = np.diff(np.concatenate([np.zeros_like(pp[:1]), pp], axis=0), axis=0)
-        if np.nanmin(inc) < -0.2:
-            raise ValueError("ECMWF: acumulados no monótonos; revisar reinicios GRIB")
+        # El GRIB puede cuantizar TP acumulada: el 24/10/2026 f060
+        # produjo descensos de hasta 0.245 mm aunque stepRange=0-fN.
+        # Aceptar solamente oscilaciones submilimétricas pequeñas;
+        # nunca ocultar reinicios ni descensos meteorológicamente relevantes.
+        tolerancia_mm = 0.3
+        for i, paso in enumerate(PASOS):
+            min_inc = float(np.min(inc[i]))
+            if min_inc < -tolerancia_mm:
+                raise ValueError(
+                    f"ECMWF f{paso:03d}: acumulado no monótono "
+                    f"(mínimo {min_inc:.3f} mm, tolerancia -{tolerancia_mm:.3f} mm); "
+                    "revisar reinicios GRIB"
+                )
+            negativos = int(np.count_nonzero(inc[i] < 0))
+            if negativos:
+                print(
+                    f"AVISO ECMWF f{paso:03d}: {negativos} celdas con descenso "
+                    f"de cuantización (mínimo {min_inc:.3f} mm); "
+                    "incrementos negativos truncados a cero",
+                    flush=True,
+                )
         inc = np.maximum(inc, 0)
     else:
         raise ValueError(f"Modelo desconocido {datos['model']}")
