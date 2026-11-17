@@ -36,6 +36,7 @@ public class GenerarSoundingsAutomaticoGFS {
             new PuntoSounding("Tandil", -37.3217, -59.1332),
             new PuntoSounding("Mar_del_Plata", -38.0055, -57.5426),
             new PuntoSounding("El_Palomar", -34.6099, -58.5986),
+            new PuntoSounding("Mariano_Moreno", -34.5600, -58.7897),
             new PuntoSounding("Parana", -31.7319, -60.5238),
             new PuntoSounding("Escuela_de_Aviacion_Militar", -31.3236, -64.2080),
             new PuntoSounding("Gordillo", -29.4260, -66.8500),
