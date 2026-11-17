@@ -54,6 +54,7 @@ public class DescargaGFSMenu {
             new PuntoMeteograma("Tandil", -37.3217, -59.1332),
             new PuntoMeteograma("Mar_del_Plata", -38.0055, -57.5426),
             new PuntoMeteograma("El_Palomar", -34.6099, -58.5986),
+            new PuntoMeteograma("Mariano_Moreno", -34.5600, -58.7897),
             new PuntoMeteograma("Parana", -31.7319, -60.5238),
             new PuntoMeteograma("Escuela_de_Aviacion_Militar", -31.3236, -64.2080),
             new PuntoMeteograma("Gordillo", -29.4260, -66.8500),
