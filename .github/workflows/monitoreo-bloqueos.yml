@@ -1,5 +1,9 @@
 name: Monitoreo de bloqueos experimental
 on:
+  workflow_run:
+    workflows: ['Generar productos multimodelo']
+    branches: [master]
+    types: [completed]
   workflow_dispatch:
     inputs:
       run:
@@ -12,8 +16,10 @@ on:
         default: '24'
 permissions:
   contents: read
+  actions: read
 jobs:
   diagnostic:
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event != 'pull_request' && github.event.workflow_run.head_repository.full_name == github.repository) }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
     strategy:
@@ -28,12 +34,24 @@ jobs:
       - run: pip install numpy xarray cfgrib eccodes requests ecmwf-opendata
       - name: Test unitario
         run: python -m unittest discover -s python/bloqueos -p 'test_*.py'
+      - name: Recuperar corrida del multimodelo
+        if: github.event_name == 'workflow_run'
+        uses: actions/download-artifact@v4
+        with:
+          name: multimodelo-${{ matrix.model == 'GFS' && 'gfs' || 'ecmwf' }}
+          path: entrada_multimodelo
+          github-token: ${{ github.token }}
+          run-id: ${{ github.event.workflow_run.id }}
       - name: Diagnostico
         env:
           RUN: ${{ inputs.run }}
           HOURS: ${{ inputs.hours }}
           MODEL: ${{ matrix.model }}
         run: |
+          if [ "$GITHUB_EVENT_NAME" = workflow_run ]; then
+            RUN=$(python python/bloqueos/corrida.py entrada_multimodelo "$MODEL")
+            HOURS=120
+          fi
           mkdir -p salida_bloqueos
           cp visor-bloqueos/index.html salida_bloqueos/
           python python/bloqueos/generar.py --run "$RUN" --hours "$HOURS" --model "$MODEL" --output "salida_bloqueos/$MODEL.json"
