@@ -1,0 +1,44 @@
+name: Monitoreo de bloqueos experimental
+on:
+  workflow_dispatch:
+    inputs:
+      run:
+        description: 'Corrida UTC YYYYMMDDHH (00 o 12)'
+        required: true
+      hours:
+        description: 'Horizonte'
+        type: choice
+        options: ['24','120','240']
+        default: '24'
+permissions:
+  contents: read
+jobs:
+  diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        model: [GFS, ECMWF]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install numpy xarray cfgrib eccodes requests ecmwf-opendata
+      - name: Test unitario
+        run: python -m unittest discover -s python/bloqueos -p 'test_*.py'
+      - name: Diagnostico
+        env:
+          RUN: ${{ inputs.run }}
+          HOURS: ${{ inputs.hours }}
+          MODEL: ${{ matrix.model }}
+        run: |
+          mkdir -p salida_bloqueos
+          cp visor-bloqueos/index.html salida_bloqueos/
+          python python/bloqueos/generar.py --run "$RUN" --hours "$HOURS" --model "$MODEL" --output "salida_bloqueos/$MODEL.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bloqueos-${{ matrix.model }}
+          path: salida_bloqueos/
+          retention-days: 14
