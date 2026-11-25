@@ -36,7 +36,9 @@ def main():
     p.add_argument("--hours",type=int,default=120)
     args=p.parse_args()
     run=dt.datetime.strptime(args.run,"%Y%m%d%H").replace(tzinfo=dt.timezone.utc)
-    if run.hour not in (0,12) or args.hours not in (24,120,240): raise ValueError("Corrida/plazo no admitido")
+    allowed = (0,6,12,18) if args.model == 'GFS' else (0,12)
+    print(f'{args.model}: inicializacion {run.isoformat()}', flush=True)
+    if run.hour not in allowed or args.hours not in (24,120,240): raise ValueError("Corrida/plazo no admitido")
     fields={}; errors={}
     with tempfile.TemporaryDirectory() as tmp:
         for step in range(0,args.hours+1,6):
