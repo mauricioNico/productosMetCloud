@@ -12,8 +12,10 @@ def cycle(root, model):
     if len(runs)!=1:
         raise ValueError("Corrida ausente o ambigua")
     run=runs.pop()
-    if run.hour not in (0,12) or run.minute or run.second:
-        raise ValueError("Corrida no admitida")
+    print(f'{model}: corrida CSV UTC {run.isoformat()}', file=sys.stderr)
+    allowed = (0,6,12,18) if model == 'GFS' else (0,12)
+    if run.hour not in allowed or run.minute or run.second or run.microsecond:
+        raise ValueError(f'Corrida no admitida para {model}: {run.isoformat()}')
     return run.strftime("%Y%m%d%H")
 
 if __name__=="__main__":
