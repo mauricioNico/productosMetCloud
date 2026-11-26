@@ -49,13 +49,16 @@
           >
         </section>
         <section>
-          <h2>Evolución longitud–tiempo</h2>
-          <p>
-            La fecha más reciente aparece arriba. Seleccioná una celda para
-            consultar su diagnóstico.
-          </p>
-          <div class="key"></div>
-          <div id="hov"></div>
+          <h2>Valideces en <span id="timeLongitude"></span></h2>
+          <p>Elegí una fila para actualizar el mapa y el diagnóstico.</p>
+          <div class="times-scroll">
+            <table class="times"><thead id="timesHead"></thead><tbody id="timesBody"></tbody></table>
+          </div>
+          <details id="showHov">
+            <summary>Ver diagrama longitud–tiempo</summary>
+            <div class="key"></div>
+            <div id="hov"></div>
+          </details>
         </section>
         <section>
           <h2>Diagnóstico por meridiano</h2>

@@ -148,3 +148,18 @@ p {
 button {
   padding: 0.5rem;
 }
+
+.times-scroll { overflow: auto; max-height: 24rem; }
+.times { text-align: left; }
+.times th { position: sticky; top: 0; z-index: 1; }
+.times td, .times th { padding: .45rem .6rem; white-space: normal; }
+.times td:first-child { white-space: nowrap; }
+.times tbody tr { cursor: pointer; }
+.times tbody tr:hover { background: #eef5f5; }
+.times tr.active-time { background: #daefea; box-shadow: inset 3px 0 #167c70; }
+.times button { border: 0; background: transparent; color: inherit; font: inherit; padding: .4rem .1rem; cursor: pointer; }
+.times button[aria-pressed="true"] { font-weight: 700; }
+.times td span { display: inline-block; }
+.times td span::before { content: ""; display: inline-block; width: .65em; height: .65em; margin-right: .35em; border-radius: 50%; background: var(--signal); border: 1px solid #80939b; }
+#showHov { margin-top: 1rem; }
+#showHov summary { cursor: pointer; color: #08665d; }
