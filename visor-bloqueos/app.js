@@ -675,12 +675,30 @@ async function start() {
       "sinoptico",
     );
     changeRegion();
-    for (const key of document.querySelectorAll(".key"))
+    const explanations = [
+      "Ninguno de los cinco desplazamientos Δ cumple simultáneamente GHGN > 0 m y GHGS < −10 m.",
+      "Al menos un desplazamiento Δ cumple ambas condiciones en el meridiano analizado.",
+      "Al menos tres meridianos consecutivos, separados por 2,5°, presentan señal dentro de una misma región.",
+      "En medias diarias, continuidad durante al menos cinco días consecutivos de una corrida, con solapamiento longitudinal entre días. No confirma un bloqueo mediante análisis.",
+      "Información insuficiente para el diagnóstico; no equivale a ausencia de bloqueo."
+    ];
+    for (const key of document.querySelectorAll(".key")) {
+      const guide = element("details");
+      guide.className = "signal-guide";
+      guide.open = true;
+      guide.append(element("summary", "Cómo interpretar los indicadores de bloqueo"));
+      const list = element("dl");
       legends.forEach((t, i) => {
         const s = element("span", t);
         s.style.setProperty("--c", colors[i]);
         key.append(s);
+        const term = element("dt", t);
+        term.style.setProperty("--c", colors[i]);
+        list.append(term, element("dd", explanations[i]));
       });
+      guide.append(list);
+      key.after(guide);
+    }
     $("type").onchange = changeMode;
     $("showHov").ontoggle = () => { if (!$("result").hidden) render(); };
     $("model").onchange = setCycles;
