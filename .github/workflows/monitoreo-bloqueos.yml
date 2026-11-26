@@ -53,10 +53,43 @@ jobs:
             HOURS=120
           fi
           mkdir -p salida_bloqueos
-          cp visor-bloqueos/index.html salida_bloqueos/
+          cp visor-bloqueos/artefacto.html salida_bloqueos/index.html
           python python/bloqueos/generar.py --run "$RUN" --hours "$HOURS" --model "$MODEL" --output "salida_bloqueos/$MODEL.json"
       - uses: actions/upload-artifact@v4
         with:
           name: bloqueos-${{ matrix.model }}
           path: salida_bloqueos/
           retention-days: 14
+
+  catalogo:
+    needs: diagnostic
+    if: ${{ !cancelled() && needs.diagnostic.result != 'skipped' && github.ref == 'refs/heads/master' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    concurrency:
+      group: publicar-datos-bloqueos
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          ref: datos-bloqueos
+          path: historico
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: bloqueos-*
+          path: entrada
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install numpy
+      - name: Validar, conservar campos previos y actualizar catálogo
+        run: |
+          python python/bloqueos/publicar.py entrada historico "$GITHUB_RUN_ID"
+          git -C historico config user.name "github-actions[bot]"
+          git -C historico config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C historico add --all
+          git -C historico commit -m "Bloqueos del run $GITHUB_RUN_ID"
+          git -C historico push origin HEAD:datos-bloqueos

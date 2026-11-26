@@ -1,0 +1,150 @@
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  background: #eef3f4;
+  color: #172f3d;
+  font:
+    16px/1.55 system-ui,
+    sans-serif;
+}
+header {
+  background: #113345;
+  color: white;
+  border-bottom: 5px solid #38ad99;
+}
+.wrap {
+  max-width: 1240px;
+  margin: auto;
+  padding: 1.6rem clamp(1rem, 4vw, 3.5rem);
+}
+header p {
+  margin: 0.4rem 0;
+}
+.institution {
+  letter-spacing: 0.18em;
+  font-size: 0.76rem;
+  font-weight: 700;
+  color: #aee4dc;
+}
+h1 {
+  font-size: clamp(1.55rem, 4vw, 3rem);
+  line-height: 1.05;
+  max-width: 850px;
+  margin: 0.65rem 0;
+}
+h2 {
+  font-size: 1.38rem;
+  margin: 0 0 0.6rem;
+}
+h3 {
+  font-size: 1.04rem;
+}
+section,
+.card {
+  background: #fff;
+  border: 1px solid #ccdade;
+  border-radius: 9px;
+  padding: clamp(0.8rem, 2vw, 1.5rem);
+  margin-bottom: 1rem;
+}
+.cards,
+.controls,
+.key {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+.card {
+  flex: 1;
+  min-width: 220px;
+  border-top: 4px solid #257c78;
+}
+.card strong,
+.card small,
+label {
+  display: block;
+}
+label {
+  font-size: 0.8rem;
+  font-weight: 650;
+}
+select {
+  display: block;
+  font: inherit;
+  font-size: 0.9rem;
+  max-width: 100%;
+  padding: 0.55rem 0.45rem;
+  border: 1px solid #99b3ba;
+  background: white;
+  border-radius: 4px;
+  color: inherit;
+}
+small {
+  font-size: 0.82rem;
+}
+.warn,
+#notice:not(:empty) {
+  color: #7e3b08;
+  background: #fff1d9;
+  padding: 0.5rem;
+}
+.key {
+  font-size: 0.8rem;
+}
+.key span:before {
+  content: "";
+  display: inline-block;
+  width: 0.85em;
+  height: 0.85em;
+  background: var(--c);
+  margin-right: 0.35rem;
+  border: 1px solid #69818b;
+}
+.plot {
+  width: 100%;
+  display: block;
+  cursor: crosshair;
+  background: #e8f2f4;
+  touch-action: manipulation;
+}
+.scroll {
+  overflow-x: auto;
+}
+table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.82rem;
+  text-align: right;
+}
+th,
+td {
+  padding: 0.35rem;
+  border-bottom: 1px solid #d5e0e1;
+  white-space: nowrap;
+}
+th {
+  background: #edf3f4;
+}
+tr.pass {
+  background: #d5efe1;
+}
+.selected {
+  font-weight: 650;
+}
+a {
+  color: #08665d;
+}
+p {
+  margin: 0.45rem 0 0.85rem;
+}
+[hidden] {
+  display: none !important;
+}
+:focus-visible {
+  outline: 3px solid #037b90;
+}
+button {
+  padding: 0.5rem;
+}
