@@ -193,6 +193,7 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read
+      actions: read
       pages: write
       id-token: write
     environment:
@@ -308,6 +309,20 @@ jobs:
         uses: actions/upload-pages-artifact@v4
         with:
           path: _site
+          name: github-pages-${{ github.run_attempt }}
+      - name: Esperar la disponibilidad del artefacto de este intento
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          nombre="github-pages-$GITHUB_RUN_ATTEMPT"
+          for intento in {1..12}; do
+            sleep 5
+            cantidad=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?name=$nombre" --jq '.total_count') || continue
+            if [ "$cantidad" = 1 ]; then exit 0; fi
+          done
+          exit 1
       - name: Publicar última corrida válida
         id: deployment
         uses: actions/deploy-pages@v4
+        with:
+          artifact_name: github-pages-${{ github.run_attempt }}
