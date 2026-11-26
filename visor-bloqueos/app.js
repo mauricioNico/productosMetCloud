@@ -274,7 +274,7 @@ function canvas(parent, height, label) {
   c.className = "plot";
   c.setAttribute("aria-label", label);
   parent.append(c);
-  const width = Math.max(290, c.clientWidth),
+  const width = Math.max(1, c.clientWidth),
     ratio = window.devicePixelRatio || 1;
   c.style.height = height + "px";
   c.width = Math.round(width * ratio);
@@ -331,12 +331,10 @@ function contour(ctx, grid, x, y, west, east) {
   ctx.globalAlpha = 1;
 }
 function map(parent, frame) {
-  const [west, east] = bounds(),
-    { c, ctx, width, height } = canvas(
-      parent,
-      240,
-      "Mapa de meridianos y Z500",
-    );
+  const [west, east] = bounds();
+  const mapWidth = Math.max(1, parent.clientWidth);
+  const { c, ctx, width, height } = canvas(parent, 35 + mapWidth * 90 / (east - west), "Mapa de meridianos y Z500");
+  c.classList.add("map-plot");
   const x = (lon) => ((lon - west) / (east - west)) * width,
     y = (lat) => 15 - (lat / 90) * (height - 35);
   for (let j = 0; j < 144; j++) {
@@ -360,6 +358,12 @@ function map(parent, frame) {
     ctx.fill();
     ctx.stroke();
   }
+  ctx.save();
+  ctx.strokeStyle = "#607d8b"; ctx.globalAlpha = .25; ctx.lineWidth = .6;
+  ctx.beginPath();
+  for(let l = Math.ceil(west / 15)*15; l <= east; l += 15){ctx.moveTo(x(l),y(0));ctx.lineTo(x(l),y(-90));}
+  for(let l = 0; l >= -90; l -= 15){ctx.moveTo(x(west),y(l));ctx.lineTo(x(east),y(l));}
+  ctx.stroke(); ctx.restore();
   contour(ctx, frame.grid, x, y, west, east);
   for (let j = (west + 180) / 2.5; j <= (lastLongitude(east) + 180) / 2.5; j++) {
     ctx.fillStyle = colors[frame.flags[j]];
@@ -386,7 +390,7 @@ function map(parent, frame) {
     const l = west + (i * (east - west)) / 4;
     ctx.fillText(lonText(l), x(l) + (i === 4 ? -2 : 2), height - 3);
   }
-  c.onclick = (e) => pick(west + ((east - west) * e.offsetX) / width);
+  c.onclick = (e) => { const rect = c.getBoundingClientRect(); pick(west + (east - west) * (e.clientX - rect.left) / rect.width); };
 }
 function pick(lon) {
   const [a, b] = bounds();
