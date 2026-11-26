@@ -333,10 +333,12 @@ function contour(ctx, grid, x, y, west, east) {
 function map(parent, frame) {
   const [west, east] = bounds();
   const mapWidth = Math.max(1, parent.clientWidth);
-  const { c, ctx, width, height } = canvas(parent, 35 + mapWidth * 90 / (east - west), "Mapa de meridianos y Z500");
+  const { c, ctx, width, height } = canvas(parent, 35 + mapWidth * 35 / (east - west), "Mapa de meridianos y Z500");
   c.classList.add("map-plot");
   const x = (lon) => ((lon - west) / (east - west)) * width,
-    y = (lat) => 15 - (lat / 90) * (height - 35);
+    y = (lat) => 15 + ((-30 - lat) / 35) * (height - 35);
+  ctx.fillStyle = "#a9d8ef"; ctx.fillRect(0,0,width,height);
+  ctx.save(); ctx.beginPath(); ctx.rect(0,y(-30),width,y(-65)-y(-30)); ctx.clip();
   for (let j = 0; j < 144; j++) {
     if (frame.flags[j] === 0) continue;
     ctx.globalAlpha = 0.38;
@@ -364,10 +366,11 @@ function map(parent, frame) {
   ctx.save();
   ctx.strokeStyle = "#607d8b"; ctx.globalAlpha = .25; ctx.lineWidth = .6;
   ctx.beginPath();
-  for(let l = Math.ceil(west / 15)*15; l <= east; l += 15){ctx.moveTo(x(l),y(0));ctx.lineTo(x(l),y(-90));}
-  for(let l = 0; l >= -90; l -= 15){ctx.moveTo(x(west),y(l));ctx.lineTo(x(east),y(l));}
+  for(let l = Math.ceil(west / 15)*15; l <= east; l += 15){ctx.moveTo(x(l),y(-30));ctx.lineTo(x(l),y(-65));}
+  for(let l = -30; l >= -65; l -= 5){ctx.moveTo(x(west),y(l));ctx.lineTo(x(east),y(l));}
   ctx.stroke(); ctx.restore();
   contour(ctx, frame.grid, x, y, west, east);
+  ctx.restore();
   for (let j = (west + 180) / 2.5; j <= (lastLongitude(east) + 180) / 2.5; j++) {
     ctx.fillStyle = colors[frame.flags[j]];
     ctx.fillRect(
@@ -387,7 +390,7 @@ function map(parent, frame) {
   ctx.setLineDash([]);
   ctx.fillStyle = "#153145";
   for (const lat of [-30, -50, -65])
-    ctx.fillText(Math.abs(lat) + "° S", 5, y(lat) - 3);
+    ctx.fillText(Math.abs(lat) + "° S", 5, y(lat) + (lat === -30 ? 12 : -3));
   for (let i = 0; i <= 4; i++) {
     ctx.textAlign = i === 4 ? "right" : "left";
     const l = west + (i * (east - west)) / 4;
