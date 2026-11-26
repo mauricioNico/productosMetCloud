@@ -388,17 +388,54 @@ function map(parent, frame) {
   }
   c.onclick = (e) => pick(west + ((east - west) * e.offsetX) / width);
 }
-function pick(lon, time) {
-  if (time && !validities.includes(time)) {
-    $("notice").textContent =
-      "La celda carece de campos comunes para esta selección.";
-    return;
-  }
+function pick(lon) {
   const [a, b] = bounds();
   $("lon").value = Math.max(a, Math.min(lastLongitude(b), Math.round(lon / 2.5) * 2.5));
-  if (time) $("valid").value = time;
   $("notice").textContent = "";
   render();
+}
+function selectTime(time) {
+  if (!validities.includes(time)) {
+    $("notice").textContent = "La hora elegida carece de campos para esta selección.";
+    return;
+  }
+  $("valid").value = time;
+  $("notice").textContent = "";
+  render();
+}
+function timeTable(mode, selected, j) {
+  $("timeLongitude").textContent = lonText(lonAt(j));
+  const head = element("tr");
+  for (const title of ["Validez UTC", ...models]) head.append(element("th", title));
+  $("timesHead").replaceChildren(head);
+  const rows = validities.map((time) => {
+    const row = element("tr");
+    const date = time.slice(0, 10).split("-").reverse().join("/");
+    const button = element("button", date + (mode === "instant" ? " · " + time.slice(11, 16) : ""));
+    button.type = "button";
+    button.value = time;
+    button.setAttribute("aria-pressed", String(time === selected));
+    row.classList.toggle("active-time", time === selected);
+    row.insertCell().append(button);
+    for (const data of products) {
+      const cell = row.insertCell();
+      if (mode === "instant") {
+        const hours = (Date.parse(time) - Date.parse(data.run)) / 3600000;
+        cell.append(element("strong", "+" + hours + " h "));
+      }
+      const flag = data[mode][time].flags[j];
+      const signal = element("span", legends[flag]);
+      signal.style.setProperty("--signal", colors[flag]);
+      cell.append(signal);
+    }
+    row.onclick = () => {
+      const hadFocus = document.activeElement === button;
+      selectTime(time);
+      if (hadFocus) $("timesBody").querySelector('[aria-pressed="true"]').focus({preventScroll: true});
+    };
+    return row;
+  });
+  $("timesBody").replaceChildren(...rows);
 }
 function hov(parent, data) {
   const [west, east] = bounds(),
@@ -452,8 +489,7 @@ function hov(parent, data) {
   }
   c.onclick = (e) => {
     const i = Math.floor((e.offsetY - top) / row);
-    if (e.offsetX >= left && dates[i])
-      pick(west + 2.5 * Math.floor((e.offsetX - left) / dx), dates[i]);
+    if (dates[i]) selectTime(dates[i]);
   };
 }
 function table(parent, frame, j) {
@@ -508,6 +544,7 @@ function render() {
     utc(time) +
     " UTC · " +
     $("mode").selectedOptions[0].text;
+  timeTable(mode, time, j);
   const states = [];
   products.forEach((data, i) => {
     const frame = data[mode][time],
@@ -522,10 +559,13 @@ function render() {
         : step
           ? "pronóstico +" + step + " h"
           : "campo inicial +0 h");
-    for (const id of ["maps", "hov", "details"])
+    for (const id of ["maps", "details"])
       $(id).append(element("h3", title));
     map($("maps"), frame);
-    hov($("hov"), data);
+    if ($("showHov").open) {
+      $("hov").append(element("h3", title));
+      hov($("hov"), data);
+    }
     table($("details"), frame, j);
     const [west, east] = bounds();
     const spans = frame.spans.filter(
@@ -632,6 +672,7 @@ async function start() {
         key.append(s);
       });
     $("type").onchange = changeMode;
+    $("showHov").ontoggle = () => { if (!$("result").hidden) render(); };
     $("model").onchange = setCycles;
     $("mode").onchange = changeMode;
     $("region").onchange = changeRegion;
