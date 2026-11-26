@@ -285,9 +285,9 @@ function canvas(parent, height, label) {
   return { c, ctx, width, height };
 }
 function contour(ctx, grid, x, y, west, east) {
-  ctx.strokeStyle = "#446878";
-  ctx.lineWidth = 0.7;
-  ctx.globalAlpha = 0.72;
+  ctx.strokeStyle = "#233c52";
+  ctx.lineWidth = 1.1;
+  ctx.globalAlpha = 0.95;
   ctx.beginPath();
   for (let j = (west + 180) / 2.5; j < (east + 180) / 2.5; j++) {
     for (let i = 0; i < 14; i++) {
@@ -338,6 +338,8 @@ function map(parent, frame) {
   const x = (lon) => ((lon - west) / (east - west)) * width,
     y = (lat) => 15 - (lat / 90) * (height - 35);
   for (let j = 0; j < 144; j++) {
+    if (frame.flags[j] === 0) continue;
+    ctx.globalAlpha = 0.38;
     ctx.fillStyle = colors[frame.flags[j]];
     ctx.fillRect(
       x(lonAt(j) - 1.25),
@@ -346,8 +348,9 @@ function map(parent, frame) {
       y(-65) - y(-30),
     );
   }
-  ctx.fillStyle = "#c7d5ce";
-  ctx.strokeStyle = "#667f7d";
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = "#d8b58b";
+  ctx.strokeStyle = "#795b40";
   ctx.lineWidth = 0.8;
   for (const ring of land) {
     ctx.beginPath();
