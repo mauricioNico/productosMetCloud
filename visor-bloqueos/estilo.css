@@ -190,3 +190,11 @@ header .institutional-head { display:grid; grid-template-columns:minmax(0,1fr) a
 header .institutional-head > div { min-width:0; }
 header .institutional-head > .shield { grid-column:2; grid-row:1; justify-self:end; align-self:center; display:block; }
 @media(max-width:650px){header .institutional-head{gap:10px;}}
+
+.signal-guide { margin:.7rem 0 1rem; padding:.7rem .9rem; background:#f5f8fb; border:1px solid #dbe4ed; border-radius:7px; font-size:.84rem; }
+.signal-guide summary { cursor:pointer; font-weight:700; color:#183e5b; }
+.signal-guide dl { display:grid; grid-template-columns:minmax(145px,auto) 1fr; gap:.4rem .8rem; margin:.65rem 0 0; }
+.signal-guide dt { font-weight:650; }
+.signal-guide dt::before { content:""; display:inline-block; width:.75em; height:.75em; background:var(--c); border:1px solid #80939b; margin-right:.4rem; }
+.signal-guide dd { margin:0; }
+@media(max-width:600px){.signal-guide dl{grid-template-columns:1fr;gap:.2rem}.signal-guide dd{margin-bottom:.5rem}}
