@@ -8,6 +8,11 @@ const regions = [
   ["IND", "Océano Índico", 10, 100],
   ["OCN", "Oceanía", 100, 180],
 ];
+const views = [
+  ["sinoptico", "Dominio sinóptico · 110° O a 20° O", -110, -20],
+  ["all", "Hemisferio Sur", -180, 180],
+  ...regions,
+];
 const colors = ["#e1ebef", "#efb547", "#16988c", "#86448b", "#788793"];
 const legends = [
   "Sin señal",
@@ -19,7 +24,7 @@ const legends = [
 const deltas = [0, -2.5, -5, -7.5, -10];
 const $ = (id) => document.getElementById(id);
 const lonAt = (j) => -180 + 2.5 * j;
-const lonText = (x) => Math.abs(x) + "°" + (x < 0 ? " O" : x > 0 ? " E" : "");
+const lonText = (x) => Math.abs(x).toLocaleString("es-AR") + "°" + (x < 0 ? " O" : x > 0 ? " E" : "");
 const utc = (t) => t.slice(0, 16).replace("T", " ");
 const fmt = (n) =>
   n.toLocaleString("es-AR", {
@@ -246,16 +251,17 @@ function changeMode() {
   if (validities.length) render();
 }
 function bounds() {
-  return (
-    regions.find((r) => r[0] === $("region").value)?.slice(2) || [-180, 180]
-  );
+  return views.find((v) => v[0] === $("region").value).slice(2);
+}
+function lastLongitude(east) {
+  return $("region").value === "sinoptico" ? east : east - 2.5;
 }
 function changeRegion() {
   const [a, b] = bounds(),
     old = $("lon").value || "-60";
   options(
     $("lon"),
-    Array.from({ length: (b - a) / 2.5 }, (_, i) => [
+    Array.from({ length: 1 + (lastLongitude(b) - a) / 2.5 }, (_, i) => [
       a + i * 2.5,
       lonText(a + i * 2.5),
     ]),
@@ -355,7 +361,7 @@ function map(parent, frame) {
     ctx.stroke();
   }
   contour(ctx, frame.grid, x, y, west, east);
-  for (let j = (west + 180) / 2.5; j < (east + 180) / 2.5; j++) {
+  for (let j = (west + 180) / 2.5; j <= (lastLongitude(east) + 180) / 2.5; j++) {
     ctx.fillStyle = colors[frame.flags[j]];
     ctx.fillRect(
       x(lonAt(j) - 1.25),
@@ -375,9 +381,10 @@ function map(parent, frame) {
   ctx.fillStyle = "#153145";
   for (const lat of [-30, -50, -65])
     ctx.fillText(Math.abs(lat) + "° S", 5, y(lat) - 3);
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i <= 4; i++) {
+    ctx.textAlign = i === 4 ? "right" : "left";
     const l = west + (i * (east - west)) / 4;
-    ctx.fillText(lonText(l), x(l) + 2, height - 3);
+    ctx.fillText(lonText(l), x(l) + (i === 4 ? -2 : 2), height - 3);
   }
   c.onclick = (e) => pick(west + ((east - west) * e.offsetX) / width);
 }
@@ -388,7 +395,7 @@ function pick(lon, time) {
     return;
   }
   const [a, b] = bounds();
-  $("lon").value = Math.max(a, Math.min(b - 2.5, Math.round(lon / 2.5) * 2.5));
+  $("lon").value = Math.max(a, Math.min(lastLongitude(b), Math.round(lon / 2.5) * 2.5));
   if (time) $("valid").value = time;
   $("notice").textContent = "";
   render();
@@ -421,11 +428,12 @@ function hov(parent, data) {
     top + row * dates.length + 18,
     "Hovmöller de señales por validez UTC",
   );
-  const dx = (width - left) / ((east - west) / 2.5);
+  const last = lastLongitude(east);
+  const dx = (width - left) / (1 + (last - west) / 2.5);
   dates.forEach((t, i) => {
     ctx.fillStyle = "#243f50";
     ctx.fillText(utc(t).replace(/^\d{4}-/, ""), 3, top + i * row + 12);
-    for (let j = (west + 180) / 2.5; j < (east + 180) / 2.5; j++) {
+    for (let j = (west + 180) / 2.5; j <= (lastLongitude(east) + 180) / 2.5; j++) {
       const xx = left + ((lonAt(j) - west) / 2.5) * dx,
         yy = top + i * row;
       ctx.fillStyle = colors[data[mode][t]?.flags[j] ?? 4];
@@ -437,12 +445,11 @@ function hov(parent, data) {
     }
   });
   ctx.fillStyle = "#243f50";
-  for (let i = 0; i < 4; i++)
-    ctx.fillText(
-      lonText(west + (i * (east - west)) / 4),
-      left + (i * (width - left)) / 4,
-      height - 2,
-    );
+  for (let i = 0; i <= 4; i++) {
+    const col = Math.round(((last - west) * i) / (2.5 * 4));
+    ctx.textAlign = i === 4 ? "right" : "left";
+    ctx.fillText(lonText(west + col * 2.5), left + (col + 0.5) * dx, height - 2);
+  }
   c.onclick = (e) => {
     const i = Math.floor((e.offsetY - top) / row);
     if (e.offsetX >= left && dates[i])
@@ -520,8 +527,9 @@ function render() {
     map($("maps"), frame);
     hov($("hov"), data);
     table($("details"), frame, j);
+    const [west, east] = bounds();
     const spans = frame.spans.filter(
-      (s) => $("region").value === "all" || $("region").value === s.region,
+      (s) => lonAt(s.end) >= west && lonAt(s.start) <= lastLongitude(east),
     );
     $("details").append(
       element(
@@ -613,8 +621,8 @@ async function start() {
     options($("model"), choices);
     options(
       $("region"),
-      [["all", "Hemisferio Sur"], ...regions.map((r) => r.slice(0, 2))],
-      "ATL",
+      views.map((v) => v.slice(0, 2)),
+      "sinoptico",
     );
     changeRegion();
     for (const key of document.querySelectorAll(".key"))
