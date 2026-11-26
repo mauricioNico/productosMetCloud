@@ -178,3 +178,10 @@ select { border-color:#a9bac9; min-height:2.5rem; }
 .institution-footer { background:#102c45; color:#e1e8ef; font-size:.85rem; border-top:3px solid #c4a35c; }
 .institution-footer .wrap { padding-block:1rem; }
 @media(max-width:600px){ .controls > label { flex:1 1 140px; min-width:0; } .controls select { width:100%; } .card { min-width:0; flex-basis:100%; } }
+
+header { background:linear-gradient(125deg,#113254,#245587); border-bottom:0; }
+.institution { color:#d5e6f6; }
+.institutional-head { display:flex; justify-content:space-between; align-items:center; gap:20px; }
+.shield { width:76px; height:76px; object-fit:contain; flex:0 0 76px; }
+.map-plot { background:#a9d8ef; }
+@media(max-width:650px){.shield{width:54px;height:54px;flex-basis:54px;}}
