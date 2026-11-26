@@ -22,6 +22,7 @@ on:
       - python/alertas_web/**
       - web/cartografia/**
       - web/monitoreo-extremo/**
+      - visor-bloqueos/**
       - vigilancia/config/umbrales.csv
       - .github/workflows/generar-zip-alertas-web.yml
 
