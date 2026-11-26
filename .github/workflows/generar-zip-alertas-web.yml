@@ -298,6 +298,10 @@ jobs:
                 'registros',cnt,'tamaño ZIP', (datos/'monitoreo-extremo.zip').stat().st_size)
           print('Página NO OPERATIVA, publicación del sitio habilitada solo tras validación.')
           PY
+      - name: Incorporar visor de bloqueos al sitio
+        run: |
+          mkdir -p _site/visor-bloqueos
+          cp visor-bloqueos/{index.html,app.js,estilo.css,tierra.json} _site/visor-bloqueos/
       - name: Configurar GitHub Pages
         uses: actions/configure-pages@v5
       - name: Subir sitio estático a GitHub Pages

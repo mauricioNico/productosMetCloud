@@ -1,7 +1,93 @@
-<!doctype html><html lang="es"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Monitoreo de bloqueos</title><style>body{font:16px system-ui;max-width:1050px;margin:2rem auto;padding:1rem;background:#f1f5f9;color:#123}table{border-collapse:collapse;width:100%;background:white}td,th{padding:.6rem;border:1px solid #ccd}select,input{padding:.5rem;margin:.4rem}pre{white-space:pre-wrap}</style><h1>Monitoreo de bloqueos atmosféricos</h1><p>Diagnóstico experimental · Mendes et al. (2008) · Z500</p><p>Cargar JSON de los artefactos GFS o ECMWF. No requiere servidor local.</p><input id="file" type="file" accept=".json" multiple><div><select id="model"></select><select id="time"></select><label>Meridiano (° E, negativo al oeste) <select id="lon"></select></label></div><p id="meta"></p><table><thead><tr><th>Δ</th><th>Z norte</th><th>Z 01</th><th>Z 02</th><th>Z sur</th><th>GHGN m</th><th>GHGS m</th><th>Señal</th></tr></thead><tbody id="rows"></tbody></table><h2>Sectores y persistencia prevista</h2><pre id="daily"></pre><script>
-const el=id=>document.getElementById(id), datasets=[];
-function opts(node,items){node.replaceChildren(...items.map(([v,t])=>new Option(t,v)))}
-function run(){const d=datasets[+el('model').value];if(!d)return;const items=[...d.instant,...d.daily.filter(x=>x.rows)];opts(el('time'),items.map((x,i)=>[i,x.valid||x.date+' media diaria']));opts(el('lon'),d.instant[0].rows.map(x=>[x.lon,x.lon]));el('lon').value='-60';show()}
-function show(){const d=datasets[+el('model').value];if(!d)return;const x=[...d.instant,...d.daily.filter(x=>x.rows)][+el('time').value];const r=x.rows.find(r=>r.lon===+el('lon').value);el('meta').textContent=d.model+' | '+d.run+' | '+(x.valid||x.date)+' | '+(r.blocked?'Señal local':'Sin señal');el('rows').replaceChildren(...r.details.map(v=>{const tr=document.createElement('tr');for(const a of [v.delta,...v.z.map(z=>(z/10).toFixed(2)),v.ghgn.toFixed(2),v.ghgs.toFixed(2),v.blocked?'Sí':'No']){const td=tr.insertCell();td.textContent=a}return tr}));el('daily').textContent='Z en dam. Sectores del plazo: '+JSON.stringify(x.sectors)+'\n'+d.daily.map(y=>y.date+' '+(y.streak?JSON.stringify(y.streak):'incompleto')).join('\n')+'\nPlazos faltantes: '+Object.keys(d.errors).join(', ')+'\nCinco días previstos no constituyen confirmación por análisis.'}
-el('file').onchange=async()=>{try{datasets.length=0;for(const f of el('file').files){const d=JSON.parse(await f.text());if(!d.instant?.length)throw Error('JSON sin datos');datasets.push(d)}opts(el('model'),datasets.map((d,i)=>[i,d.model+' '+d.run]));run()}catch(e){el('meta').textContent=e.message}};el('model').onchange=run;el('time').onchange=el('lon').onchange=show;
-</script></html>
+<!doctype html>
+<html lang="es-AR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="theme-color" content="#102f41" />
+    <title>Monitoreo de Bloqueos Atmosféricos · DMM</title>
+    <link rel="stylesheet" href="estilo.css" />
+    <script defer src="app.js"></script>
+  </head>
+  <body>
+    <header>
+      <div class="wrap">
+        <p class="institution">DEPARTAMENTO METEOROLOGÍA MILITAR</p>
+        <h1>MONITOREO DE BLOQUEOS ATMOSFÉRICOS</h1>
+        <p>Hemisferio Sur — Índice de Mendes</p>
+        <small id="updated">Consultando catálogo…</small>
+      </div>
+    </header>
+    <main class="wrap">
+      <div id="status" class="cards"></div>
+      <p id="notice" role="status"></p>
+      <section>
+        <h2>Selección del diagnóstico</h2>
+        <div class="controls">
+          <label>Modelo<select id="model"></select></label>
+          <div id="cycles" class="controls"></div>
+          <label>Diagnóstico<select id="mode"></select></label
+          ><label>Origen del campo<select id="type"></select></label
+          ><label>Validez UTC<select id="valid"></select></label
+          ><label>Plazo desde la corrida<select id="step"></select></label
+          ><label>Región<select id="region"></select></label
+          ><label>Meridiano<select id="lon"></select></label>
+        </div>
+      </section>
+      <div id="result" hidden>
+        <section>
+          <h2>Distribución hemisférica</h2>
+          <p>
+            Seleccioná un meridiano en el mapa. Las isohipsas corresponden a
+            Z500 cada 6 dam, interpoladas sobre la grilla disponible de 2,5°
+            entre 30° S y 65° S.
+          </p>
+          <div class="key"></div>
+          <div id="maps"></div>
+          <small
+            >Costas de Natural Earth, escala 1:110 millones · Proyección
+            equidistante cilíndrica.</small
+          >
+        </section>
+        <section>
+          <h2>Evolución longitud–tiempo</h2>
+          <p>
+            La fecha más reciente aparece arriba. Seleccioná una celda para
+            consultar su diagnóstico.
+          </p>
+          <div class="key"></div>
+          <div id="hov"></div>
+        </section>
+        <section>
+          <h2>Diagnóstico por meridiano</h2>
+          <p id="selection"></p>
+          <div id="details"></div>
+          <p id="agreement"></p>
+        </section>
+      </div>
+      <section>
+        <h2>Interpretación y alcance</h2>
+        <p>
+          Una señal local requiere GHGN &gt; 0 m y GHGS &lt; −10 m para un mismo
+          Δ. La continuidad requiere tres meridianos adyacentes dentro de una
+          región. La media diaria se calcula con Z500 de las 00, 06, 12 y 18 UTC
+          antes de aplicar el índice.
+        </p>
+        <p>
+          La persistencia prevista identifica sectores en al menos cinco días
+          consecutivos de una corrida, con solapamiento longitudinal entre días
+          dentro de la misma región. El solapamiento es el criterio operativo de
+          seguimiento de este visor.
+        </p>
+        <p>
+          Confirmación por análisis: indeterminada. El archivo distingue campos
+          iniciales (+0 h) y pronósticos. Aún no se verifica una serie
+          independiente de cuatro análisis por día durante cinco días. La
+          clasificación Rex u Omega requiere un diagnóstico sinóptico adicional.
+        </p>
+        <a href="https://idlcc.fc.ul.pt/pdf/Damiao_et_al_2008.pdf"
+          >Mendes et al. (2008), sección 2.2</a
+        >
+      </section>
+    </main>
+  </body>
+</html>
